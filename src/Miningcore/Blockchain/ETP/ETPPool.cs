@@ -192,14 +192,26 @@ namespace Miningcore.Blockchain.ETP
 
             if (poolConfig.EnableInternalStratum == true)
             {
+                logger.Info(() => "Setting up stratum job notifications...");
+
                 disposables.Add(manager.Jobs.Subscribe(job =>
                 {
+                    logger.Debug(() => $"Broadcasting job to {connections.Count} workers");
+
                     // Send job to connected workers
                     ForEachMinerAsync(async (client, _) =>
                     {
-                        var context = client.ContextAs<ETPWorkerContext>();
-                        await client.NotifyAsync(ETPConstants.StratumMethods.SetDifficulty, new object[] { context.Difficulty });
-                        await client.NotifyAsync(ETPConstants.StratumMethods.MiningNotify, job.GetJobParamsForStratum());
+                        try 
+                        {
+                            var context = client.ContextAs<ETPWorkerContext>();
+                            await client.NotifyAsync(ETPConstants.StratumMethods.SetDifficulty, new object[] { context.Difficulty });
+                            await client.NotifyAsync(ETPConstants.StratumMethods.MiningNotify, job.GetJobParamsForStratum());
+                            logger.Debug(() => $"Sent job to worker {client.ConnectionId}");
+                        }
+                        catch (Exception ex)
+                        {
+                            logger.Error(() => $"Failed to send job to worker {client.ConnectionId}: {ex.Message}");
+                        }
                     });
                 }));
 
@@ -208,6 +220,8 @@ namespace Miningcore.Blockchain.ETP
                 {
                     logger.Info(() => $"New job received at height {job.Height}");
                 }));
+
+                logger.Info(() => "Stratum job notifications setup complete");
             }
         }
 
@@ -245,9 +259,11 @@ namespace Miningcore.Blockchain.ETP
         {
             logger.Info(() => $"Starting pool {poolConfig.Id}");
 
-            await SetupJobManager(ct);
-            
+            // Сначала запускаем базовый RunAsync, который стартует Stratum сервер
             await base.RunAsync(ct);
+
+            // Затем настраиваем JobManager, который подписывается на события
+            await SetupJobManager(ct);
 
             logger.Info(() => $"Pool {poolConfig.Id} started");
         }
