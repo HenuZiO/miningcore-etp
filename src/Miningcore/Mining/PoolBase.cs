@@ -96,11 +96,13 @@ public abstract class PoolBase : StratumServer,
         return null;
     }
 
-    protected override void OnConnect(StratumConnection connection, IPEndPoint ipEndPoint)
+    protected override void OnConnect(StratumConnection connection, IPEndPoint endPoint)
     {
+        logger.Info(() => $"[{connection.ConnectionId}] Client connected from {endPoint.Address}:{endPoint.Port}");
+        
         // setup context
         var context = CreateWorkerContext();
-        var poolEndpoint = poolConfig.Ports[ipEndPoint.Port];
+        var poolEndpoint = poolConfig.Ports[endPoint.Port];
         var varDiff = poolConfig.EnableInternalStratum == true ? poolEndpoint.VarDiff : null;
 
         context.Init(poolEndpoint.Difficulty, varDiff, clock);
@@ -306,21 +308,39 @@ public abstract class PoolBase : StratumServer,
 
     protected async Task RunStratum(CancellationToken ct)
     {
+        logger.Info(() => "Starting RunStratum...");
+
+        if(poolConfig?.Ports == null)
+        {
+            logger.Error(() => "No ports configured!");
+            return;
+        }
+
         var ipEndpoints = poolConfig.Ports.Keys
             .Select(port => PoolEndpoint2IPEndpoint(port, poolConfig.Ports[port]))
             .ToArray();
+
+        if(ipEndpoints.Length == 0)
+        {
+            logger.Error(() => "No endpoints created!");
+            return;
+        }
 
         logger.Info(() => $"Created endpoints: {string.Join(", ", ipEndpoints.Select(x => $"{x.IPEndPoint.Address}:{x.IPEndPoint.Port}"))}");
 
         var varDiffEnabled = ipEndpoints.Any(x => x.PoolEndpoint.VarDiff != null);
 
+        logger.Info(() => "Starting base.RunAsync...");
         var tasks = new List<Task>
         {
             base.RunAsync(ct, ipEndpoints)
         };
 
         if(varDiffEnabled)
+        {
+            logger.Info(() => "Starting VarDiff updater...");
             tasks.Add(RunVardiffIdleUpdaterAsync(poolConfig.VardiffIdleSweepInterval ?? 30, ct));
+        }
 
         await Task.WhenAll(tasks);
     }
