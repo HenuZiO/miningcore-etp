@@ -266,12 +266,17 @@ namespace Miningcore.Blockchain.ETP
 
         public override async Task RunAsync(CancellationToken ct)
         {
-            logger.Info(() => $"Starting pool {poolConfig.Id}");
+            logger.Info(() => "Starting Pool ...");
 
-            // Вызываем базовый RunAsync, который настроит все компоненты и запустит стратум
-            await base.RunAsync(ct);
-
-            logger.Info(() => $"Pool {poolConfig.Id} started");
+            try
+            {
+                await base.RunAsync(ct);
+            }
+            catch (Exception ex)
+            {
+                logger.Error(ex);
+                throw;
+            }
         }
 
         private void LogPoolInfo()

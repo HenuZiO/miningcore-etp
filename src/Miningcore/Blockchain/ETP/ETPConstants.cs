@@ -13,8 +13,10 @@ namespace Miningcore.Blockchain.ETP
         public const decimal StaticTransactionFeeReserve = 0.0001m; // ETP
         public const decimal TransactionFeeReserve = 0.0001m; // ETP
         
+        public const string RpcGetInfo = "getinfo";
         public const string RpcGetWork = "getwork";
         public const string RpcSubmitWork = "submitwork";
+        public const string RpcValidateAddress = "validateaddress";
         public const string RpcGetBlockTemplate = "getblocktemplate";
         public const string RpcGetMiningInfo = "getmininginfo";
         
@@ -34,11 +36,11 @@ namespace Miningcore.Blockchain.ETP
 
         public static class RpcMethods
         {
+            public const string GetInfo = "getinfo";
             public const string GetWork = "getwork";
             public const string SubmitWork = "submitwork";
-            public const string GetMiningInfo = "getmininginfo";
-            public const string GetPeerInfo = "getpeerinfo";
             public const string ValidateAddress = "validateaddress";
+            public const string GetPeerInfo = "getpeerinfo";
         }
 
         public static class StratumMethods

@@ -84,7 +84,7 @@ namespace Miningcore.Blockchain.ETP
             try
             {
                 var response = await rpcClient.ExecuteAsync<GetInfoResponse>(logger,
-                    ETPConstants.RpcMethods.GetMiningInfo, ct);
+                    ETPConstants.RpcMethods.GetInfo, ct, new object[] { });
 
                 return response.Error == null;
             }
@@ -99,7 +99,7 @@ namespace Miningcore.Blockchain.ETP
             try
             {
                 var response = await rpcClient.ExecuteAsync<GetInfoResponse>(logger,
-                    ETPConstants.RpcMethods.GetMiningInfo, ct);
+                    ETPConstants.RpcMethods.GetInfo, ct, new object[] { });
 
                 return response.Error == null && response.Response?.Peers > 0;
             }
@@ -118,7 +118,7 @@ namespace Miningcore.Blockchain.ETP
             do
             {
                 var response = await rpcClient.ExecuteAsync<GetInfoResponse>(logger,
-                    ETPConstants.RpcMethods.GetMiningInfo, ct);
+                    ETPConstants.RpcMethods.GetInfo, ct, new object[] { });
 
                 var isSynched = response.Error == null && response.Response?.Peers > 0;
 
@@ -177,7 +177,7 @@ namespace Miningcore.Blockchain.ETP
 
                 // Get current block number for height
                 var blockResponse = await rpcClient.ExecuteAsync<GetInfoResponse>(logger,
-                    ETPConstants.RpcMethods.GetMiningInfo, ct);
+                    ETPConstants.RpcMethods.GetInfo, ct, new object[] { });
 
                 if (blockResponse?.Error != null)
                 {
