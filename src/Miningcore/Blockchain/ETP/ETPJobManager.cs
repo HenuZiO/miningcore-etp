@@ -36,24 +36,28 @@ namespace Miningcore.Blockchain.ETP
         private readonly Subject<ETPJob> jobSubject = new();
         public IObservable<ETPJob> Jobs => jobSubject.AsObservable();
 
-        private new readonly ILogger logger;
         private new readonly IMessageBus messageBus;
         private readonly JsonSerializerSettings serializerSettings;
+        private ILogger baseLogger;
+
+        private readonly Subject<Share> shareSubject = new();
+        private readonly Task persistenceTask;
 
         public ETPJobManager(
             IComponentContext ctx,
             IMessageBus messageBus,
-            JsonSerializerSettings serializerSettings,
-            PoolConfig poolConfig) : base(ctx, messageBus)
+            JsonSerializerSettings serializerSettings) : base(ctx, messageBus)
         {
             Contract.RequiresNonNull(messageBus);
             Contract.RequiresNonNull(serializerSettings);
-            Contract.RequiresNonNull(poolConfig);
             Contract.RequiresNonNull(ctx);
 
             this.messageBus = messageBus;
             this.serializerSettings = serializerSettings;
-            this.logger = LogUtil.GetPoolScopedLogger(typeof(ETPJobManager), poolConfig);
+            this.baseLogger = LogUtil.GetPoolScopedLogger(typeof(ETPJobManager), (string)null);
+            
+            // Initialize persistence task
+            persistenceTask = Task.CompletedTask;
         }
 
         public override void Configure(PoolConfig pc, ClusterConfig cc)
@@ -61,6 +65,7 @@ namespace Miningcore.Blockchain.ETP
             Contract.RequiresNonNull(pc);
             Contract.RequiresNonNull(cc);
 
+            baseLogger = LogUtil.GetPoolScopedLogger(typeof(ETPJobManager), pc);
             poolConfig = pc;
             clusterConfig = cc;
             extraPoolConfig = pc.Extra.SafeExtensionDataAs<ETPPoolConfigExtra>();
@@ -85,7 +90,7 @@ namespace Miningcore.Blockchain.ETP
         {
             try
             {
-                var response = await rpcClient.ExecuteAsync<GetInfoResponse>(logger,
+                var response = await rpcClient.ExecuteAsync<GetInfoResponse>(baseLogger,
                     ETPConstants.RpcMethods.GetInfo, ct, new object[] { });
 
                 return response.Error == null;
@@ -100,7 +105,7 @@ namespace Miningcore.Blockchain.ETP
         {
             try
             {
-                var response = await rpcClient.ExecuteAsync<GetInfoResponse>(logger,
+                var response = await rpcClient.ExecuteAsync<GetInfoResponse>(baseLogger,
                     ETPConstants.RpcMethods.GetInfo, ct, new object[] { });
 
                 return response.Error == null && response.Response?.Peers > 0;
@@ -119,20 +124,20 @@ namespace Miningcore.Blockchain.ETP
 
             do
             {
-                var response = await rpcClient.ExecuteAsync<GetInfoResponse>(logger,
+                var response = await rpcClient.ExecuteAsync<GetInfoResponse>(baseLogger,
                     ETPConstants.RpcMethods.GetInfo, ct, new object[] { });
 
                 var isSynched = response.Error == null && response.Response?.Peers > 0;
 
                 if(isSynched)
                 {
-                    logger.Info(() => "All daemons synched with blockchain");
+                    baseLogger.Info(() => "All daemons synched with blockchain");
                     break;
                 }
 
                 if(!syncPendingNotificationShown)
                 {
-                    logger.Info(() => "Daemon is still syncing with network. Manager will be started once synced");
+                    baseLogger.Info(() => "Daemon is still syncing with network. Manager will be started once synced");
                     syncPendingNotificationShown = true;
                 }
 
@@ -158,18 +163,18 @@ namespace Miningcore.Blockchain.ETP
         {
             try
             {
-                var response = await rpcClient.ExecuteAsync<string[]>(logger,
+                var response = await rpcClient.ExecuteAsync<string[]>(baseLogger,
                     ETPConstants.RpcMethods.GetWork, ct, new object[] { });
 
                 if (response?.Error != null)
                 {
-                    logger.Error(() => $"Error during getwork: {response.Error.Message}");
+                    baseLogger.Error(() => $"Error during getwork: {response.Error.Message}");
                     return;
                 }
 
                 if (response?.Response == null || response.Response.Length == 0)
                 {
-                    logger.Error(() => $"Got empty getwork response");
+                    baseLogger.Error(() => $"Got empty getwork response");
                     return;
                 }
 
@@ -177,12 +182,12 @@ namespace Miningcore.Blockchain.ETP
                 var workResult = new GetWorkResult(response.Response);
 
                 // Get current block number for height
-                var blockResponse = await rpcClient.ExecuteAsync<GetInfoResponse>(logger,
+                var blockResponse = await rpcClient.ExecuteAsync<GetInfoResponse>(baseLogger,
                     ETPConstants.RpcMethods.GetInfo, ct, new object[] { });
 
                 if (blockResponse?.Error != null)
                 {
-                    logger.Error(() => $"Error getting block number: {blockResponse.Error.Message}");
+                    baseLogger.Error(() => $"Error getting block number: {blockResponse.Error.Message}");
                     return;
                 }
 
@@ -201,11 +206,11 @@ namespace Miningcore.Blockchain.ETP
                 // Broadcast to connected clients
                 jobSubject.OnNext(job);
 
-                logger.Info(() => $"New job at height {job.Height}");
+                baseLogger.Info(() => $"New job at height {job.Height}");
             }
             catch(Exception ex)
             {
-                logger.Error(ex, () => "Error during job update");
+                baseLogger.Error(ex, () => "Error during job update");
             }
         }
 
@@ -228,19 +233,19 @@ namespace Miningcore.Blockchain.ETP
             }
 
             context.CurrentDifficulty = difficulty;
-            logger.Info($"[{connection.ConnectionId}] Setting difficulty to {difficulty} for worker {context.Worker ?? "Unknown"}");
+            baseLogger.Info($"[{connection.ConnectionId}] Setting difficulty to {difficulty} for worker {context.Worker ?? "Unknown"}");
 
             // Send current job
             var job = GetJob();
             if (job != null)
             {
-                logger.Info($"[{connection.ConnectionId}] Sending initial job to worker {context.Worker ?? "Unknown"}");
+                baseLogger.Info($"[{connection.ConnectionId}] Sending initial job to worker {context.Worker ?? "Unknown"}");
                 connection.NotifyAsync(ETPConstants.StratumMethods.SetDifficulty, new object[] { context.CurrentDifficulty });
                 connection.NotifyAsync(ETPConstants.StratumMethods.MiningNotify, job.GetJobParamsForStratum());
             }
             else
             {
-                logger.Warn($"[{connection.ConnectionId}] No job available for worker {context.Worker ?? "Unknown"}");
+                baseLogger.Warn($"[{connection.ConnectionId}] No job available for worker {context.Worker ?? "Unknown"}");
             }
         }
 
@@ -252,27 +257,80 @@ namespace Miningcore.Blockchain.ETP
             }
         }
 
-        public Task<Share> SubmitShareAsync(StratumConnection worker,
-            string[] request, double difficulty, CancellationToken ct)
+        public async Task<Share> SubmitShareAsync(StratumConnection worker,
+            string[] request,
+            double stratumDifficulty,
+            CancellationToken ct)
         {
-            Contract.RequiresNonNull(worker, nameof(worker));
-            Contract.RequiresNonNull(request, nameof(request));
+            Contract.RequiresNonNull(worker);
+            Contract.RequiresNonNull(request);
 
             var context = worker.ContextAs<ETPWorkerContext>();
-            
+            var nonce = request[0];
+            var headerHash = request[1];
+            var mixHash = request[2];
+
+            ETPJob job;
+
+            lock (jobLock)
+            {
+                job = currentJob;
+            }
+
+            if (job == null)
+                throw new StratumException(StratumError.MinusOne, "job not found");
+
+            // Create share
             var share = new Share
             {
-                PoolId = base.poolConfig.Id,
-                Difficulty = difficulty,
+                PoolId = poolConfig.Id,
+                BlockHeight = (long)job.Height,
+                Difficulty = stratumDifficulty,
                 IpAddress = worker.RemoteEndpoint?.Address?.ToString(),
                 Miner = context?.Miner,
                 Worker = context?.Worker,
                 UserAgent = context?.UserAgent,
-                Source = request[1],
+                Source = headerHash,
                 Created = DateTime.UtcNow
             };
 
-            return Task.FromResult(share);
+            // Record share for API
+            shareSubject.OnNext(share);
+
+            // Record share for payout processor
+            await persistenceTask;
+
+            // Send block to daemon if the share meets difficulty
+            if (share.Difficulty >= job.Difficulty)
+            {
+                share.IsBlockCandidate = true;
+
+                baseLogger.Info(() => $"Submitting block {share.BlockHeight}");
+
+                var acceptResponse = await rpcClient.ExecuteAsync<JsonRpcResponse<bool>>(baseLogger,
+                    ETPConstants.RpcMethods.SubmitWork, ct, new object[]
+                    {
+                        nonce,
+                        headerHash,
+                        mixHash
+                    });
+
+                var isAccepted = (bool?)acceptResponse.Response?.Result ?? false;
+                if (acceptResponse.Error != null || !isAccepted)
+                {
+                    baseLogger.Warn(() => $"Block {share.BlockHeight} submission failed with: {acceptResponse.Error?.Message ?? acceptResponse.Response?.Result.ToString()}");
+                    messageBus.SendMessage(new AdminNotification("Block submission failed", $"Pool {poolConfig.Id} {(!string.IsNullOrEmpty(share.Source) ? $"[{share.Source.ToUpper()}] " : string.Empty)}failed to submit block {share.BlockHeight}: {acceptResponse.Error?.Message ?? acceptResponse.Response?.Result.ToString()}"));
+                }
+                else
+                {
+                    baseLogger.Info(() => $"Block {share.BlockHeight} accepted by network");
+                    messageBus.SendMessage(new AdminNotification("Block accepted", $"Pool {poolConfig.Id} {(!string.IsNullOrEmpty(share.Source) ? $"[{share.Source.ToUpper()}] " : string.Empty)}submitted block {share.BlockHeight} [{share.BlockHash}]"));
+                }
+            }
+
+            return share;
         }
+
+        public double ShareMultiplier => ETPConstants.ShareMultiplier;
     }
 }
