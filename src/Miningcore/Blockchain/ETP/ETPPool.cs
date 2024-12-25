@@ -240,5 +240,16 @@ namespace Miningcore.Blockchain.ETP
             var result = shares * multiplier / interval;
             return result;
         }
+
+        public override async Task RunAsync(CancellationToken ct)
+        {
+            logger.Info(() => $"Starting pool {poolConfig.Id}");
+
+            await SetupJobManager(ct);
+            
+            await base.RunAsync(ct);
+
+            logger.Info(() => $"Pool {poolConfig.Id} started");
+        }
     }
 }
