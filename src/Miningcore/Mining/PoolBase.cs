@@ -310,6 +310,8 @@ public abstract class PoolBase : StratumServer,
             .Select(port => PoolEndpoint2IPEndpoint(port, poolConfig.Ports[port]))
             .ToArray();
 
+        logger.Info(() => $"Created endpoints: {string.Join(", ", ipEndpoints.Select(x => $"{x.IPEndPoint.Address}:{x.IPEndPoint.Port}"))}");
+
         var varDiffEnabled = ipEndpoints.Any(x => x.PoolEndpoint.VarDiff != null);
 
         var tasks = new List<Task>
@@ -418,7 +420,10 @@ Pool Fee:               {(poolConfig.RewardRecipients?.Any() == true ? poolConfi
             messageBus.NotifyPoolStatus(this, PoolStatus.Online);
 
             if(poolConfig.EnableInternalStratum == true)
+            {
+                logger.Info(() => "Starting RunStratum...");
                 await RunStratum(ct);
+            }
         }
 
         catch(PoolStartupException)

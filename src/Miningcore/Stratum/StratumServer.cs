@@ -99,6 +99,8 @@ public abstract class StratumServer
             server.Bind(port.IPEndPoint);
             server.Listen();
 
+            logger.Info(() => $"Socket created and bound to {port.IPEndPoint.Address}:{port.IPEndPoint.Port}");
+
             return Listen(server, port, ct);
         }).ToArray();
 
@@ -108,6 +110,7 @@ public abstract class StratumServer
     private async Task Listen(Socket server, StratumEndpoint port, CancellationToken ct)
     {
         var cert = GetTlsCert(port);
+        logger.Info(() => $"Listening on {port.IPEndPoint.Address}:{port.IPEndPoint.Port}");
 
         while(!ct.IsCancellationRequested)
         {
