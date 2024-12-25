@@ -31,14 +31,13 @@ namespace Miningcore.Blockchain.ETP
     public class ETPJobManager : JobManagerBase<ETPJob>
     {
         private DaemonEndpointConfig[] daemonEndpoints;
-        private readonly IExtraNonceProvider extraNonceProvider;
         private ETPPoolConfigExtra extraPoolConfig;
         private RpcClient rpcClient;
-        private readonly Subject<ETPJob> jobSubject = new Subject<ETPJob>();
+        private readonly Subject<ETPJob> jobSubject = new();
         public IObservable<ETPJob> Jobs => jobSubject.AsObservable();
-        private readonly object jobLock = new();
-        private ETPJob currentJob;
+
         private readonly IMessageBus messageBus;
+        private readonly JsonSerializerSettings serializerSettings;
 
         public ETPJobManager(
             IComponentContext ctx,
@@ -50,14 +49,14 @@ namespace Miningcore.Blockchain.ETP
             Contract.RequiresNonNull(messageBus, nameof(messageBus));
             Contract.RequiresNonNull(extraNonceProvider, nameof(extraNonceProvider));
 
-            this.extraNonceProvider = extraNonceProvider;
             this.messageBus = messageBus;
+            this.serializerSettings = ctx.Resolve<JsonSerializerSettings>();
         }
 
         public override void Configure(PoolConfig pc, ClusterConfig cc)
         {
-            Contract.RequiresNonNull(pc, nameof(pc));
-            Contract.RequiresNonNull(cc, nameof(cc));
+            Contract.RequiresNonNull(pc);
+            Contract.RequiresNonNull(cc);
 
             logger = LogUtil.GetPoolScopedLogger(typeof(ETPJobManager), pc);
             poolConfig = pc;
@@ -69,59 +68,26 @@ namespace Miningcore.Blockchain.ETP
                 .Where(x => string.IsNullOrEmpty(x.Category))
                 .ToArray();
 
-            if(daemonEndpoints.Length == 0)
-                throw new PoolStartupException("No daemons configured");
-
             ConfigureDaemons();
-
-            // Start job update timer
-            using(var timer = new System.Timers.Timer(5000))
-            {
-                timer.Elapsed += async (sender, e) =>
-                {
-                    try
-                    {
-                        await UpdateJobAsync(CancellationToken.None);
-                    }
-                    catch(Exception ex)
-                    {
-                        logger.Error(ex);
-                    }
-                };
-
-                timer.Start();
-            }
         }
 
         protected override void ConfigureDaemons()
         {
-            var daemonEndpoints = base.poolConfig.Daemons
-                .Where(x => string.IsNullOrEmpty(x.Category))
-                .ToArray();
-
-            if (daemonEndpoints.Length == 0)
+            if(daemonEndpoints.Length == 0)
                 throw new PoolStartupException("No daemons configured");
 
-            this.daemonEndpoints = daemonEndpoints;
-
-            rpcClient = new RpcClient(daemonEndpoints.First(), new JsonSerializerSettings(), messageBus, base.poolConfig.Id);
+            rpcClient = new RpcClient(daemonEndpoints[0], serializerSettings, messageBus, poolConfig.Id);
         }
 
         protected override async Task<bool> AreDaemonsHealthyAsync(CancellationToken ct)
         {
             try
             {
-                var response = await rpcClient.ExecuteAsync<GetInfoResponse>(logger, ETPCommands.GetInfo, ct, new object[] { });
+                var response = await rpcClient.ExecuteAsync<GetInfoResponse>(logger,
+                    ETPConstants.RpcMethods.GetMiningInfo, ct);
 
-                if (response.Error != null)
-                {
-                    logger.Error(() => $"Error(s) reading daemon info: {response.Error.Message}");
-                    return false;
-                }
-
-                return true;
+                return response.Error == null;
             }
-
             catch(Exception)
             {
                 return false;
@@ -132,17 +98,11 @@ namespace Miningcore.Blockchain.ETP
         {
             try
             {
-                var response = await rpcClient.ExecuteAsync<GetInfoResponse>(logger, ETPCommands.GetInfo, ct, new object[] { });
+                var response = await rpcClient.ExecuteAsync<GetInfoResponse>(logger,
+                    ETPConstants.RpcMethods.GetMiningInfo, ct);
 
-                if (response.Error != null)
-                {
-                    logger.Error(() => $"Error(s) reading daemon info: {response.Error.Message}");
-                    return false;
-                }
-
-                return response.Response.Peers > 0;
+                return response.Error == null && response.Response?.Peers > 0;
             }
-
             catch(Exception)
             {
                 return false;
@@ -157,23 +117,18 @@ namespace Miningcore.Blockchain.ETP
 
             do
             {
-                var response = await rpcClient.ExecuteAsync<GetInfoResponse>(logger, ETPCommands.GetInfo, ct, new object[] { });
+                var response = await rpcClient.ExecuteAsync<GetInfoResponse>(logger,
+                    ETPConstants.RpcMethods.GetMiningInfo, ct);
 
-                if (response.Error != null)
-                {
-                    logger.Error(() => $"Error(s) checking daemon sync status: {response.Error.Message}");
-                    continue;
-                }
+                var isSynched = response.Error == null && response.Response?.Peers > 0;
 
-                var isSynched = response.Response.Peers > 0;
-
-                if (isSynched)
+                if(isSynched)
                 {
                     logger.Info(() => "All daemons synched with blockchain");
                     break;
                 }
 
-                if (!syncPendingNotificationShown)
+                if(!syncPendingNotificationShown)
                 {
                     logger.Info(() => "Daemon is still syncing with network. Manager will be started once synced");
                     syncPendingNotificationShown = true;
@@ -185,52 +140,23 @@ namespace Miningcore.Blockchain.ETP
 
         protected override async Task PostStartInitAsync(CancellationToken ct)
         {
-            // Start periodic job updates
-            using var timer = new PeriodicTimer(TimeSpan.FromSeconds(5));
-
-            do
+            // Periodically update work
+            using var timer = new System.Timers.Timer(5000);
+            timer.Elapsed += async (sender, e) =>
             {
-                await UpdateJob(ct);
-                await timer.WaitForNextTickAsync(ct);
-            } while (!ct.IsCancellationRequested);
-        }
-
-        private async Task UpdateJob(CancellationToken ct)
-        {
-            try
-            {
-                var response = await rpcClient.ExecuteAsync<string[]>(logger,
-                    ETPCommands.GetBlockTemplate, ct, new object[] { });
-
-                if (response.Error != null)
+                try
                 {
-                    logger.Error(() => $"Error(s) updating job: {response.Error.Message}");
-                    return;
+                    await UpdateJobAsync(ct);
                 }
-
-                var workResult = new GetWorkResult(response.Response);
-
-                // Generate extra nonce values
-                workResult.ExtraNonce1 = extraNonceProvider.Next();
-                workResult.ExtraNonce2 = DateTime.UtcNow.ToString("yyyyMMddHHmmss");
-
-                var job = currentJob = new ETPJob(workResult, workResult.Height, workResult.Target);
-
-                // Notify connected workers about new job
-                if (job != null)
+                catch(Exception ex)
                 {
-                    logger.Info(() => $"Broadcasting new job {job.WorkTemplate.JobId}");
-
-                    // Broadcast to all workers
-                    BroadcastJob(job);
+                    logger.Error(ex);
                 }
+            };
 
-                jobSubject.OnNext(job);
-            }
-            catch(Exception ex)
-            {
-                logger.Error(ex, () => "Error(s) updating job");
-            }
+            timer.Start();
+
+            await Task.CompletedTask;
         }
 
         private async Task UpdateJobAsync(CancellationToken ct)

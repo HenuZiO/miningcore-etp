@@ -1,5 +1,6 @@
 using System;
 using System.Linq;
+using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Collections.Generic;
@@ -180,6 +181,14 @@ namespace Miningcore.Blockchain.ETP
                 logger.Error(ex, $"[{connection.ConnectionId}] Error processing request {request.Method}: {ex.Message}");
                 await connection.RespondErrorAsync(StratumError.Other, ex.Message, request.Id, false);
             }
+        }
+
+        protected override void OnConnect(StratumConnection connection, IPEndPoint portItem1)
+        {
+            var context = new ETPWorkerContext();
+            connection.SetContext(context);
+
+            logger.Info(() => $"[{connection.ConnectionId}] Client connected from {portItem1.Address}");
         }
 
         protected override async Task SetupJobManager(CancellationToken ct)

@@ -306,43 +306,17 @@ public abstract class PoolBase : StratumServer,
         }
     }
 
-    protected async Task RunStratum(CancellationToken ct)
+    protected virtual async Task RunStratum(CancellationToken ct)
     {
-        logger.Info(() => "Starting RunStratum...");
-
-        if(poolConfig?.Ports == null)
-        {
-            logger.Error(() => "No ports configured!");
-            return;
-        }
+        Contract.RequiresNonNull(poolConfig);
 
         var ipEndpoints = poolConfig.Ports.Keys
             .Select(port => PoolEndpoint2IPEndpoint(port, poolConfig.Ports[port]))
             .ToArray();
 
-        if(ipEndpoints.Length == 0)
-        {
-            logger.Error(() => "No endpoints created!");
-            return;
-        }
+        logger.Info(() => $"Starting Stratum Server on ports: {string.Join(", ", ipEndpoints.Select(x => x.IPEndPoint.Port))}");
 
-        logger.Info(() => $"Created endpoints: {string.Join(", ", ipEndpoints.Select(x => $"{x.IPEndPoint.Address}:{x.IPEndPoint.Port}"))}");
-
-        var varDiffEnabled = ipEndpoints.Any(x => x.PoolEndpoint.VarDiff != null);
-
-        logger.Info(() => "Starting base.RunAsync...");
-        var tasks = new List<Task>
-        {
-            base.RunAsync(ct, ipEndpoints)
-        };
-
-        if(varDiffEnabled)
-        {
-            logger.Info(() => "Starting VarDiff updater...");
-            tasks.Add(RunVardiffIdleUpdaterAsync(poolConfig.VardiffIdleSweepInterval ?? 30, ct));
-        }
-
-        await Task.WhenAll(tasks);
+        await base.RunAsync(ct, ipEndpoints);
     }
 
     protected virtual async Task<double?> GetNicehashStaticMinDiff(WorkerContextBase context, string coinName, string algoName)
