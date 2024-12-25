@@ -38,12 +38,13 @@ namespace Miningcore.Blockchain.ETP
 
         public ETPJobManager(
             IComponentContext ctx,
-            IExtraNonceProvider extraNonceProvider,
-            IMessageBus messageBus) : base(ctx, messageBus)
+            IMessageBus messageBus,
+            IExtraNonceProvider extraNonceProvider) :
+            base(ctx, messageBus)
         {
             Contract.RequiresNonNull(ctx, nameof(ctx));
-            Contract.RequiresNonNull(extraNonceProvider, nameof(extraNonceProvider));
             Contract.RequiresNonNull(messageBus, nameof(messageBus));
+            Contract.RequiresNonNull(extraNonceProvider, nameof(extraNonceProvider));
 
             this.extraNonceProvider = extraNonceProvider;
             
@@ -57,10 +58,10 @@ namespace Miningcore.Blockchain.ETP
             Contract.RequiresNonNull(cc);
 
             logger = LogUtil.GetPoolScopedLogger(typeof(ETPJobManager), pc);
-            poolConfig = pc;
+            base.poolConfig = pc;
             clusterConfig = cc;
 
-            if (poolConfig.Daemons == null || poolConfig.Daemons.Length == 0)
+            if (base.poolConfig.Daemons == null || base.poolConfig.Daemons.Length == 0)
                 throw new PoolStartupException("No daemons configured");
 
             ConfigureDaemons();
@@ -68,7 +69,7 @@ namespace Miningcore.Blockchain.ETP
 
         protected override void ConfigureDaemons()
         {
-            var daemonEndpoints = poolConfig.Daemons
+            var daemonEndpoints = base.poolConfig.Daemons
                 .Where(x => string.IsNullOrEmpty(x.Category))
                 .ToArray();
 
@@ -77,7 +78,7 @@ namespace Miningcore.Blockchain.ETP
 
             this.daemonEndpoints = daemonEndpoints;
 
-            rpcClient = new RpcClient(daemonEndpoints.First(), new JsonSerializerSettings(), messageBus, poolConfig.Id);
+            rpcClient = new RpcClient(daemonEndpoints.First(), new JsonSerializerSettings(), messageBus, base.poolConfig.Id);
         }
 
         protected override async Task<bool> AreDaemonsHealthyAsync(CancellationToken ct)
@@ -183,7 +184,7 @@ namespace Miningcore.Blockchain.ETP
             }
         }
 
-        public async Task<Share> SubmitShareAsync(StratumConnection worker,
+        public Task<Share> SubmitShareAsync(StratumConnection worker,
             string[] request, double difficulty, CancellationToken ct)
         {
             Contract.RequiresNonNull(worker, nameof(worker));
@@ -193,7 +194,7 @@ namespace Miningcore.Blockchain.ETP
             
             var share = new Share
             {
-                PoolId = poolConfig.Id,
+                PoolId = base.poolConfig.Id,
                 Difficulty = difficulty,
                 IpAddress = worker.RemoteEndpoint?.Address?.ToString(),
                 Miner = context?.Miner,
@@ -203,7 +204,7 @@ namespace Miningcore.Blockchain.ETP
                 Created = DateTime.UtcNow
             };
 
-            return share;
+            return Task.FromResult(share);
         }
     }
 }

@@ -181,6 +181,7 @@ namespace Miningcore.Blockchain.ETP
         protected override async Task SetupJobManager(CancellationToken ct)
         {
             manager = ctx.Resolve<ETPJobManager>();
+
             manager.Configure(poolConfig, clusterConfig);
 
             await manager.StartAsync(ct);
