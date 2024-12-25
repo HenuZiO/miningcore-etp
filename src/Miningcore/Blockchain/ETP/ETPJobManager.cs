@@ -15,6 +15,7 @@ using Miningcore.Extensions;
 using Miningcore.JsonRpc;
 using Miningcore.Messaging;
 using Miningcore.Mining;
+using Miningcore.Notifications;
 using Miningcore.Notifications.Messages;
 using Miningcore.Rpc;
 using Miningcore.Stratum;
@@ -35,6 +36,7 @@ namespace Miningcore.Blockchain.ETP
         private RpcClient rpcClient;
         private readonly Subject<ETPJob> jobSubject = new Subject<ETPJob>();
         public IObservable<ETPJob> Jobs => jobSubject.AsObservable();
+        private ETPPool manager;
 
         public ETPJobManager(
             IComponentContext ctx,
@@ -47,6 +49,7 @@ namespace Miningcore.Blockchain.ETP
             Contract.RequiresNonNull(extraNonceProvider, nameof(extraNonceProvider));
 
             this.extraNonceProvider = extraNonceProvider;
+            this.manager = ctx.Resolve<ETPPool>();
         }
 
         public override void Configure(PoolConfig pc, ClusterConfig cc)
@@ -190,6 +193,15 @@ namespace Miningcore.Blockchain.ETP
 
                 var job = currentJob = new ETPJob(workResult, workResult.Height, workResult.Target);
 
+                // Notify connected workers about new job
+                if (job != null)
+                {
+                    logger.Info(() => $"Broadcasting new job {job.WorkTemplate.JobId}");
+
+                    // Broadcast to all workers
+                    BroadcastJob(job);
+                }
+
                 jobSubject.OnNext(job);
             }
             catch(Exception ex)
@@ -198,24 +210,34 @@ namespace Miningcore.Blockchain.ETP
             }
         }
 
+        protected void BroadcastJob(ETPJob job)
+        {
+            jobSubject.OnNext(job);
+        }
+
         public void PrepareWorker(StratumConnection connection)
         {
             var context = connection.ContextAs<ETPWorkerContext>();
 
-            if (context == null)
-            {
-                context = new ETPWorkerContext();
-                connection.SetContext(context);
-            }
-
+            // Assign unique ExtraNonce1 to worker (unique per connection)
             context.ExtraNonce1 = extraNonceProvider.Next();
-            
+
             lock(jobLock)
             {
                 if(currentJob != null)
-                    context.Difficulty = currentJob.Difficulty;
+                    context.CurrentDifficulty = currentJob.Difficulty;
                 else
-                    context.Difficulty = extraPoolConfig?.Difficulty ?? 100000;
+                    context.CurrentDifficulty = extraPoolConfig?.Difficulty ?? 100000;
+            }
+
+            // Send difficulty
+            connection.NotifyAsync(ETPConstants.StratumMethods.SetDifficulty, new object[] { context.CurrentDifficulty });
+            context.HasSetDifficulty = true;
+
+            // Send current job if available
+            if (currentJob != null)
+            {
+                connection.NotifyAsync(ETPConstants.StratumMethods.MiningNotify, currentJob.GetStratumParams());
             }
         }
 

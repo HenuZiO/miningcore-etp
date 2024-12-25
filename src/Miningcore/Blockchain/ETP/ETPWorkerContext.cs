@@ -6,7 +6,7 @@ namespace Miningcore.Blockchain.ETP
     public class ETPWorkerContext : WorkerContextBase
     {
         public string ExtraNonce1;
-        public string CurrentDifficulty;
+        public double CurrentDifficulty;
         public ulong Hashrate { get; set; }
         public DateTime? LastShare { get; set; }
         public int ValidShares { get; set; }
@@ -14,6 +14,7 @@ namespace Miningcore.Blockchain.ETP
         public string Miner { get; set; }  // Адрес майнера
         public string Worker { get; set; }  // Имя воркера
         public ETPJob CurrentJob { get; set; }
+        public bool HasSetDifficulty { get; set; }
 
         public void UpdateShare(bool valid)
         {
