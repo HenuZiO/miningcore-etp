@@ -36,7 +36,9 @@ namespace Miningcore.Blockchain.ETP
         private RpcClient rpcClient;
         private readonly Subject<ETPJob> jobSubject = new Subject<ETPJob>();
         public IObservable<ETPJob> Jobs => jobSubject.AsObservable();
-        private ETPPool manager;
+        private readonly object jobLock = new();
+        private ETPJob currentJob;
+        private readonly IMessageBus messageBus;
 
         public ETPJobManager(
             IComponentContext ctx,
@@ -49,6 +51,7 @@ namespace Miningcore.Blockchain.ETP
             Contract.RequiresNonNull(extraNonceProvider, nameof(extraNonceProvider));
 
             this.extraNonceProvider = extraNonceProvider;
+            this.messageBus = messageBus;
         }
 
         public override void Configure(PoolConfig pc, ClusterConfig cc)

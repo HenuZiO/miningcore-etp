@@ -259,10 +259,16 @@ namespace Miningcore.Blockchain.ETP
         {
             logger.Info(() => $"Starting pool {poolConfig.Id}");
 
-            // Запускаем базовый RunAsync, который уже вызовет SetupJobManager
+            // Вызываем базовый RunAsync, который настроит все компоненты и запустит стратум
             await base.RunAsync(ct);
 
             logger.Info(() => $"Pool {poolConfig.Id} started");
+        }
+
+        private void LogPoolInfo()
+        {
+            logger.Info(() => $"Pool: {poolConfig.Id} [{string.Join(", ", poolConfig.Ports.Keys)}]");
+            logger.Info(() => $"Network: {poolConfig.Coin}");
         }
     }
 }
