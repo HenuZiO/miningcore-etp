@@ -419,7 +419,8 @@ Pool Fee:               {(poolConfig.RewardRecipients?.Any() == true ? poolConfi
 
             messageBus.NotifyPoolStatus(this, PoolStatus.Online);
 
-            if(poolConfig.EnableInternalStratum == true)
+            // Запускаем Stratum сервер по умолчанию, если явно не отключен
+            if(poolConfig.EnableInternalStratum != false)
             {
                 logger.Info(() => "Starting RunStratum...");
                 await RunStratum(ct);
