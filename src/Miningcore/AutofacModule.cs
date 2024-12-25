@@ -107,6 +107,10 @@ public class AutofacModule : Module
             .AsSelf()
             .SingleInstance();
 
+        builder.RegisterType<ETPPool>()
+            .AsSelf()
+            .SingleInstance();
+
         builder.RegisterType<PushoverClient>()
             .SingleInstance();
 

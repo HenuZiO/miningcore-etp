@@ -49,7 +49,6 @@ namespace Miningcore.Blockchain.ETP
             Contract.RequiresNonNull(extraNonceProvider, nameof(extraNonceProvider));
 
             this.extraNonceProvider = extraNonceProvider;
-            this.manager = ctx.Resolve<ETPPool>();
         }
 
         public override void Configure(PoolConfig pc, ClusterConfig cc)
