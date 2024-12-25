@@ -1,0 +1,148 @@
+API v3 Usage
+
+This documentation provides more detailed information about the API.v3(JSON-RPC 2.0) list and will be particularly helpful for people who want to build BaaS(Blockchain As A Service) appliacations. If you are interested in more basic usage of Metaverse, please refer to the docs instead.
+
+Please note that this documentation is only valid for MVS FULL NODE.
+Differences between API.v3 and API.v2, please refers to v3 VS v2
+Compatiblity for API v2, please refers to API v2.
+Compatiblity for API v1, please refers to API v1.
+
+API v3 Usage
+Supported v0.8.2 and later
+
+API	Default Port	URI	Default URL
+API v3	8820	/rpc/v3	http://127.0.0.1:8820/rpc/v3
+Websocket	8821	/ws	http://127.0.0.1:8821/ws
+Refers to How to configure Port.
+
+Build Json, then HTTP POST to URL:
+
+{                                                                        
+ "id":number,                                                         
+ "method":"xxx",                                                         
+ "params":[                                                              
+     "param1",  //command arguments from help
+     "param2",  
+     {
+         "option1": value1,  //command options from help
+         "option2": value2,  
+     }
+     ]                                                                   
+ }
+ 
+Example:
+
+$ curl -X POST --data '{"jsonrpc":"2.0","method":"getinfo","params":[],"id":25}' http://127.0.0.1:8820/rpc/v3
+$ curl -X POST --data '{"jsonrpc":"2.0","method":"sendmore","params":["account_name","account_auth",{"receivers":"t7r9twiK5gAwhR2gXDqT2zqpzS6ogvaqnJ:100000"}],"id":25}' http://127.0.0.1:8820/rpc/v3
+Obviously, Use help to get all commands(methods) list.
+
+$ ./mvs-cli help
+$ ./mvs-cli help $command
+API v3 Call List
+Account
+Method	Online-required	Admin-required	Account-required	Version
+getnewaccount	×	×	×	0.7.3
+validateaddress	×	×	×	0.7.3
+importaccount	×	×	×	0.7.3
+importkeyfile	×	×	×	0.7.3
+dumpkeyfile	×	×	√	0.7.3
+getnewaddress	×	×	√	0.7.3
+listaddresses	×	×	√	0.7.3
+changepasswd	×	×	√	0.7.3
+deleteaccount	×	×	√	0.7.3
+getaccount	×	×	√	0.7.3
+Blockchain
+Method	Online-required	Admin-required	Account-required	Version
+shutdown	×	√	×	0.7.3
+getinfo	×	√	×	0.7.3
+getheight	×	√	×	0.7.3
+getpeerinfo	×	√	×	0.7.3
+getmininginfo	√	√	×	0.7.3
+getstakeinfo	√	√	×	0.9.0
+startmining	√	×	√	0.7.3
+stopmining	√	×	√	0.7.3
+getwork	√	×	√	0.7.3
+addnode	×	√	×	0.7.3
+setminingaccount	√	×	√	0.7.3
+submitwork	√	×	√	0.7.3
+getmemorypool	×	√	×	0.7.3
+Block
+Method	Online-required	Admin-required	Account-required	Version
+getblock	×	√	×	0.7.3
+getblockheader	×	√	×	0.7.3
+ETP
+Method	Online-required	Admin-required	Account-required	Version
+getbalance	×	×	√	0.7.3
+listbalances	×	×	√	0.7.3
+send	√	×	√	0.7.3
+sendfrom	√	×	√	0.7.3
+sendmore	√	×	√	0.7.3
+getaddressetp	×	×	×	0.8.0
+lock	√	×	√	0.9.0
+getlocked	√	×	√	0.9.0
+Transaction
+Method	Online-required	Admin-required	Account-required	Version
+gettx	√	×	×	0.7.3
+listtxs	√	×	√	0.7.3
+Multi-Signatue
+Method	Online-required	Admin-required	Account-required	Version
+createmultisigtx	×	×	√	0.7.3
+getpublickey	×	×	√	0.7.3
+deletemultisig	×	×	√	0.7.3
+getnewmultisig	×	×	√	0.7.3
+listmultisig	×	×	√	0.7.3
+signmultisigtx	×	×	√	0.7.3
+Rawtx(offline-sign)
+Method	Online-required	Admin-required	Account-required	Version
+createrawtx	×	×	×	0.7.3
+signrawtx	×	×	√	0.7.3
+decoderawtx	×	×	×	0.7.3
+sendrawtx	√	×	×	0.7.3
+DID
+Method	Online-required	Admin-required	Account-required	Version
+registerdid	√	×	√	0.8.0
+didchangeaddress	√	×	√	0.8.0
+listdids	×	×	×	0.8.0
+getdid	×	×	×	0.8.0
+didsend	√	×	√	0.8.0
+didsendfrom	√	×	√	0.8.0
+didsendmore	√	×	√	0.8.0
+didsendasset	√	×	√	0.8.0
+didsendassetfrom	√	×	√	0.8.0
+MST
+Method	Online-required	Admin-required	Account-required	Version
+createasset	×	×	√	0.7.3
+deletelocalasset	×	×	√	0.7.3
+getaccountasset	√	×	√	0.7.3
+getaddressasset	√	×	√	0.7.3
+getasset	×	×	×	0.7.3
+issue	√	×	√	0.7.3
+issuefrom	√	×	√	0.7.3
+listassets	√	×	optional	0.7.3
+sendasset	√	×	√	0.7.3
+sendmoreasset	√	×	√	0.7.3
+sendassetfrom	√	×	√	0.7.3
+burn	√	×	√	0.8.0
+validatesymbol	×	×	√	0.9.0
+Cert
+Method	Online-required	Admin-required	Account-required	Version
+issuecert	√	×	√	0.8.0
+transfercert	√	×	√	0.8.0
+MIT
+Method	Online-required	Admin-required	Account-required	Version
+registermit	√	×	√	0.8.0
+transfermit	√	×	√	0.8.0
+listmits	×	×	optional	0.8.0
+getmit	×	×	×	0.8.0
+Method : JSON-RPC Method
+Online-required: whether needs to wait for almost latest height.
+Admin-required: whether provides administrator authorization, defaluts to no. (name: administrator)(password: mvsgo).
+
+# mvs.conf
+[server]
+administrator_required = 1
+Account-required : user account name, password required.
+
+Version : release in version.
+mvs-cli
+mvs-cli uses /rpc/v3 to call mvsd after v0.8.2.
