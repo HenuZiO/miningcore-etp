@@ -34,10 +34,10 @@ namespace Miningcore.Blockchain.ETP
 
         public static class RpcMethods
         {
-            public const string GetMiningInfo = "getmininginfo";
-            public const string GetPeerInfo = "getpeerinfo";
             public const string GetWork = "getwork";
             public const string SubmitWork = "submitwork";
+            public const string GetMiningInfo = "getmininginfo";
+            public const string GetPeerInfo = "getpeerinfo";
             public const string ValidateAddress = "validateaddress";
         }
 
@@ -47,11 +47,10 @@ namespace Miningcore.Blockchain.ETP
             public const string Subscribe = "mining.subscribe";
             public const string Authorize = "mining.authorize";
             public const string SubmitShare = "mining.submit";
-            public const string ExtraNonceSubscribe = "mining.extranonce.subscribe";
             public const string SetDifficulty = "mining.set_difficulty";
             public const string MiningNotify = "mining.notify";
 
-            // Ethereum Stratum Methods
+            // ETP Specific Methods
             public const string EthSubmitLogin = "eth_submitLogin";
             public const string EthGetWork = "eth_getWork";
             public const string EthSubmitWork = "eth_submitWork";

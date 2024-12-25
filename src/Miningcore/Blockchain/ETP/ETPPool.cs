@@ -259,11 +259,8 @@ namespace Miningcore.Blockchain.ETP
         {
             logger.Info(() => $"Starting pool {poolConfig.Id}");
 
-            // Сначала запускаем базовый RunAsync, который стартует Stratum сервер
+            // Запускаем базовый RunAsync, который уже вызовет SetupJobManager
             await base.RunAsync(ct);
-
-            // Затем настраиваем JobManager, который подписывается на события
-            await SetupJobManager(ct);
 
             logger.Info(() => $"Pool {poolConfig.Id} started");
         }

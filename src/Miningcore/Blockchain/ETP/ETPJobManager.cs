@@ -53,20 +53,41 @@ namespace Miningcore.Blockchain.ETP
 
         public override void Configure(PoolConfig pc, ClusterConfig cc)
         {
-            Contract.RequiresNonNull(pc);
-            Contract.RequiresNonNull(cc);
+            Contract.RequiresNonNull(pc, nameof(pc));
+            Contract.RequiresNonNull(cc, nameof(cc));
 
             logger = LogUtil.GetPoolScopedLogger(typeof(ETPJobManager), pc);
-            base.poolConfig = pc;
+            poolConfig = pc;
             clusterConfig = cc;
+            extraPoolConfig = pc.Extra.SafeExtensionDataAs<ETPPoolConfigExtra>();
 
-            if (pc.Extra != null)
-                extraPoolConfig = pc.Extra.SafeExtensionDataAs<ETPPoolConfigExtra>();
+            // Extract daemon endpoints
+            daemonEndpoints = pc.Daemons
+                .Where(x => string.IsNullOrEmpty(x.Category))
+                .ToArray();
 
-            if (base.poolConfig.Daemons == null || base.poolConfig.Daemons.Length == 0)
+            if(daemonEndpoints.Length == 0)
                 throw new PoolStartupException("No daemons configured");
 
             ConfigureDaemons();
+
+            // Start job update timer
+            using(var timer = new System.Timers.Timer(5000))
+            {
+                timer.Elapsed += async (sender, e) =>
+                {
+                    try
+                    {
+                        await UpdateJobAsync(CancellationToken.None);
+                    }
+                    catch(Exception ex)
+                    {
+                        logger.Error(ex);
+                    }
+                };
+
+                timer.Start();
+            }
         }
 
         protected override void ConfigureDaemons()
@@ -206,6 +227,52 @@ namespace Miningcore.Blockchain.ETP
             catch(Exception ex)
             {
                 logger.Error(ex, () => "Error(s) updating job");
+            }
+        }
+
+        private async Task UpdateJobAsync(CancellationToken ct)
+        {
+            try
+            {
+                var response = await rpcClient.ExecuteAsync<string[]>(logger,
+                    ETPConstants.RpcMethods.GetWork, ct);
+
+                if (response?.Error != null)
+                {
+                    logger.Error(() => $"Error during getwork: {response.Error.Message}");
+                    return;
+                }
+
+                // Create GetWorkResult from response
+                var workResult = new GetWorkResult(response.Response);
+
+                // Get current block number for height
+                var blockResponse = await rpcClient.ExecuteAsync<GetInfoResponse>(logger,
+                    ETPConstants.RpcMethods.GetMiningInfo, ct);
+
+                if (blockResponse?.Error != null)
+                {
+                    logger.Error(() => $"Error getting block number: {blockResponse.Error.Message}");
+                    return;
+                }
+
+                workResult.Height = (ulong)blockResponse.Response.Height;
+
+                // Create job
+                var job = new ETPJob(workResult, workResult.Height, workResult.Target);
+
+                lock(jobLock)
+                {
+                    currentJob = job;
+                }
+
+                jobSubject.OnNext(job);
+
+                logger.Info(() => $"New job at height {job.Height}");
+            }
+            catch(Exception ex)
+            {
+                logger.Error(ex, () => "Error during job update");
             }
         }
 
