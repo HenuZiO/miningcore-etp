@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Numerics;
 using System.Threading;
 using System.Threading.Tasks;
 using Miningcore.Configuration;
@@ -16,15 +17,29 @@ namespace Miningcore.Blockchain.ETP
 {
     public class ETPJob
     {
-        public GetBlockTemplateResponse BlockTemplate { get; set; }
-        public int Height { get; set; }
+        public GetWorkResult WorkTemplate { get; set; }
+        public ulong Height { get; set; }
+        public string Target { get; set; }
         public double Difficulty { get; set; }
 
-        public ETPJob(GetBlockTemplateResponse blockTemplate, int height, string difficulty)
+        public ETPJob(GetWorkResult workTemplate, ulong height, string target)
         {
-            BlockTemplate = blockTemplate;
+            WorkTemplate = workTemplate;
             Height = height;
-            Difficulty = double.Parse(difficulty, CultureInfo.InvariantCulture);
+            Target = target;
+            
+            // Convert target to difficulty
+            var targetValue = BigInteger.Parse(target.Replace("0x", ""), NumberStyles.HexNumber);
+            if (targetValue > 0)
+            {
+                // Difficulty = (2^256 - 1) / target
+                var maxTarget = BigInteger.Pow(2, 256) - 1;
+                Difficulty = (double)(maxTarget / targetValue);
+            }
+            else
+            {
+                Difficulty = 1.0; // Default difficulty if target is invalid
+            }
         }
 
         // Получить параметры для GetWork
@@ -32,9 +47,9 @@ namespace Miningcore.Blockchain.ETP
         {
             return new object[]
             {
-                BlockTemplate.HeaderHash,    // текущий хеш блока
-                BlockTemplate.SeedHash,     // seed хеш
-                "0x" + ((ulong)Difficulty).ToString("x16", CultureInfo.InvariantCulture).PadLeft(64, '0')  // цель
+                "0x" + WorkTemplate.HeaderHash,    // текущий хеш блока
+                "0x" + WorkTemplate.SeedHash,      // seed хеш
+                "0x" + WorkTemplate.Target         // цель
             };
         }
 
@@ -43,11 +58,11 @@ namespace Miningcore.Blockchain.ETP
         {
             return new object[]
             {
-                BlockTemplate.JobId,           // id работы
-                BlockTemplate.PrevHash,     // предыдущий хеш
-                BlockTemplate.ExtraNonce1,  // экстра нонс 1
-                BlockTemplate.ExtraNonce2,  // экстра нонс 2
-                BlockTemplate.NTime,        // время
+                WorkTemplate.JobId,           // id работы
+                WorkTemplate.PreviousBlockHash,     // предыдущий хеш
+                WorkTemplate.ExtraNonce1,  // экстра нонс 1
+                WorkTemplate.ExtraNonce2,  // экстра нонс 2
+                WorkTemplate.Timestamp.ToString("x8"),        // время
                 true         // clean jobs
             };
         }
@@ -57,13 +72,13 @@ namespace Miningcore.Blockchain.ETP
         {
             return new object[]
             {
-                BlockTemplate.JobId,                  // Job ID
-                BlockTemplate.HeaderHash,          // Current block header hash
-                BlockTemplate.SeedHash,           // Seed hash for DAG
-                "0x" + ((ulong)Difficulty).ToString("x16", CultureInfo.InvariantCulture).PadLeft(64, '0'),        // Target for shares
+                WorkTemplate.JobId,                  // Job ID
+                "0x" + WorkTemplate.HeaderHash,          // Current block header hash
+                "0x" + WorkTemplate.SeedHash,           // Seed hash for DAG
+                "0x" + WorkTemplate.Target,        // Target for shares
                 true,              // Clean jobs
                 Height,           // Block height
-                Difficulty       // Difficulty
+                Target       // Difficulty
             };
         }
     }

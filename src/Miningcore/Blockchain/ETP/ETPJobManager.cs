@@ -173,7 +173,7 @@ namespace Miningcore.Blockchain.ETP
         {
             try
             {
-                var response = await rpcClient.ExecuteAsync<GetBlockTemplateResponse>(logger,
+                var response = await rpcClient.ExecuteAsync<string[]>(logger,
                     ETPCommands.GetBlockTemplate, ct, new object[] { });
 
                 if (response.Error != null)
@@ -182,11 +182,13 @@ namespace Miningcore.Blockchain.ETP
                     return;
                 }
 
-                // Generate extra nonce values
-                response.Response.ExtraNonce1 = extraNonceProvider.Next();
-                response.Response.ExtraNonce2 = DateTime.UtcNow.ToString("yyyyMMddHHmmss");
+                var workResult = new GetWorkResult(response.Response);
 
-                var job = currentJob = new ETPJob(response.Response, response.Response.Height, response.Response.Difficulty);
+                // Generate extra nonce values
+                workResult.ExtraNonce1 = extraNonceProvider.Next();
+                workResult.ExtraNonce2 = DateTime.UtcNow.ToString("yyyyMMddHHmmss");
+
+                var job = currentJob = new ETPJob(workResult, workResult.Height, workResult.Target);
 
                 jobSubject.OnNext(job);
             }

@@ -77,5 +77,9 @@ namespace Miningcore.Blockchain.ETP.DaemonResponses
 
         [JsonProperty("seedhash")]
         public string SeedHash { get; set; }
+
+        // Additional fields for mining
+        public string ExtraNonce1 { get; set; }
+        public string ExtraNonce2 { get; set; }
     }
 }
