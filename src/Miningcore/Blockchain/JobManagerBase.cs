@@ -21,6 +21,9 @@ public abstract class JobManagerBase<TJob>
 
         this.ctx = ctx;
         this.messageBus = messageBus;
+        
+        // Initialize with a temporary logger
+        this.logger = LogManager.GetLogger(typeof(JobManagerBase<TJob>).Name);
     }
 
     protected readonly IComponentContext ctx;
