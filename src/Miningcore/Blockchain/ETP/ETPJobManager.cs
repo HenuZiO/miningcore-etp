@@ -159,8 +159,14 @@ namespace Miningcore.Blockchain.ETP
 
         protected override async Task PostStartInitAsync(CancellationToken ct)
         {
-            // Nothing special to do
-            await Task.CompletedTask;
+            // Start periodic job updates
+            using var timer = new PeriodicTimer(TimeSpan.FromSeconds(5));
+
+            do
+            {
+                await UpdateJob(ct);
+                await timer.WaitForNextTickAsync(ct);
+            } while (!ct.IsCancellationRequested);
         }
 
         private async Task UpdateJob(CancellationToken ct)
