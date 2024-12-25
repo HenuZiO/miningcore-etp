@@ -333,7 +333,7 @@ public abstract class PoolBase : StratumServer,
 
     private StratumEndpoint PoolEndpoint2IPEndpoint(int port, PoolEndpoint pep)
     {
-        var listenAddress = IPAddress.Parse("127.0.0.1");
+        var listenAddress = IPAddress.Any;  // Listen on all interfaces by default
         if(!string.IsNullOrEmpty(pep.ListenAddress))
             listenAddress = pep.ListenAddress != "*" ? IPAddress.Parse(pep.ListenAddress) : IPAddress.Any;
 
