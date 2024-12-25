@@ -31,7 +31,7 @@ namespace Miningcore.Blockchain.ETP
     {
         private DaemonEndpointConfig[] daemonEndpoints;
         private readonly IExtraNonceProvider extraNonceProvider;
-        private readonly ETPPoolConfigExtra extraPoolConfig;
+        private ETPPoolConfigExtra extraPoolConfig;
         private RpcClient rpcClient;
         private readonly Subject<ETPJob> jobSubject = new Subject<ETPJob>();
         public IObservable<ETPJob> Jobs => jobSubject.AsObservable();
@@ -47,9 +47,6 @@ namespace Miningcore.Blockchain.ETP
             Contract.RequiresNonNull(extraNonceProvider, nameof(extraNonceProvider));
 
             this.extraNonceProvider = extraNonceProvider;
-            
-            if (ctx.Resolve<PoolConfig>().Extra != null)
-                this.extraPoolConfig = ctx.Resolve<PoolConfig>().Extra.SafeExtensionDataAs<ETPPoolConfigExtra>();
         }
 
         public override void Configure(PoolConfig pc, ClusterConfig cc)
@@ -60,6 +57,9 @@ namespace Miningcore.Blockchain.ETP
             logger = LogUtil.GetPoolScopedLogger(typeof(ETPJobManager), pc);
             base.poolConfig = pc;
             clusterConfig = cc;
+
+            if (pc.Extra != null)
+                extraPoolConfig = pc.Extra.SafeExtensionDataAs<ETPPoolConfigExtra>();
 
             if (base.poolConfig.Daemons == null || base.poolConfig.Daemons.Length == 0)
                 throw new PoolStartupException("No daemons configured");
