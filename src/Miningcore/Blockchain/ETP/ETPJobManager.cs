@@ -85,7 +85,7 @@ namespace Miningcore.Blockchain.ETP
         {
             try
             {
-                var response = await rpcClient.ExecuteAsync<GetInfoResponse>(logger, ETPCommands.GetInfo, ct);
+                var response = await rpcClient.ExecuteAsync<GetInfoResponse>(logger, ETPCommands.GetInfo, ct, new object[] { });
 
                 if (response.Error != null)
                 {
@@ -106,7 +106,7 @@ namespace Miningcore.Blockchain.ETP
         {
             try
             {
-                var response = await rpcClient.ExecuteAsync<GetInfoResponse>(logger, ETPCommands.GetInfo, ct);
+                var response = await rpcClient.ExecuteAsync<GetInfoResponse>(logger, ETPCommands.GetInfo, ct, new object[] { });
 
                 if (response.Error != null)
                 {
@@ -131,7 +131,7 @@ namespace Miningcore.Blockchain.ETP
 
             do
             {
-                var response = await rpcClient.ExecuteAsync<GetInfoResponse>(logger, ETPCommands.GetInfo, ct);
+                var response = await rpcClient.ExecuteAsync<GetInfoResponse>(logger, ETPCommands.GetInfo, ct, new object[] { });
 
                 if (response.Error != null)
                 {
@@ -168,7 +168,7 @@ namespace Miningcore.Blockchain.ETP
             try
             {
                 var response = await rpcClient.ExecuteAsync<GetBlockTemplateResponse>(logger,
-                    ETPCommands.GetBlockTemplate, ct);
+                    ETPCommands.GetBlockTemplate, ct, new object[] { });
 
                 if (response.Error != null)
                 {
