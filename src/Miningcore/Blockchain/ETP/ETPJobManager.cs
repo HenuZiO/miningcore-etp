@@ -83,75 +83,110 @@ namespace Miningcore.Blockchain.ETP
 
         protected override async Task<bool> AreDaemonsHealthyAsync(CancellationToken ct)
         {
-            var response = await rpcClient.ExecuteAsync<GetMiningInfoResponse>(logger, ETPCommands.GetMiningInfo, ct);
-            return response?.Error == null;
+            try
+            {
+                var response = await rpcClient.ExecuteAsync<GetInfoResponse>(logger, ETPCommands.GetInfo, ct);
+
+                if (response.Error != null)
+                {
+                    logger.Error(() => $"Error(s) reading daemon info: {response.Error.Message}");
+                    return false;
+                }
+
+                return true;
+            }
+
+            catch(Exception)
+            {
+                return false;
+            }
         }
 
         protected override async Task<bool> AreDaemonsConnectedAsync(CancellationToken ct)
         {
-            var response = await rpcClient.ExecuteAsync<string[]>(logger, ETPCommands.GetPeerInfo, ct);
-            return response?.Response?.Any() == true;
+            try
+            {
+                var response = await rpcClient.ExecuteAsync<GetInfoResponse>(logger, ETPCommands.GetInfo, ct);
+
+                if (response.Error != null)
+                {
+                    logger.Error(() => $"Error(s) reading daemon info: {response.Error.Message}");
+                    return false;
+                }
+
+                return response.Response.Peers > 0;
+            }
+
+            catch(Exception)
+            {
+                return false;
+            }
         }
 
         protected override async Task EnsureDaemonsSynchedAsync(CancellationToken ct)
         {
-            var response = await rpcClient.ExecuteAsync<GetMiningInfoResponse>(logger, ETPCommands.GetMiningInfo, ct);
-            
-            if (response?.Response == null)
-                throw new Exception("Unable to get mining info");
+            using var timer = new PeriodicTimer(TimeSpan.FromSeconds(30));
 
-            if (response.Response.BlockType?.ToLower() != "pow")
-                throw new Exception("Current block is not PoW");
+            var syncPendingNotificationShown = false;
+
+            do
+            {
+                var response = await rpcClient.ExecuteAsync<GetInfoResponse>(logger, ETPCommands.GetInfo, ct);
+
+                if (response.Error != null)
+                {
+                    logger.Error(() => $"Error(s) checking daemon sync status: {response.Error.Message}");
+                    continue;
+                }
+
+                var isSynched = response.Response.Peers > 0;
+
+                if (isSynched)
+                {
+                    logger.Info(() => "All daemons synched with blockchain");
+                    break;
+                }
+
+                if (!syncPendingNotificationShown)
+                {
+                    logger.Info(() => "Daemon is still syncing with network. Manager will be started once synced");
+                    syncPendingNotificationShown = true;
+                }
+
+                await timer.WaitForNextTickAsync(ct);
+            } while(true);
         }
 
         protected override async Task PostStartInitAsync(CancellationToken ct)
         {
+            // Nothing special to do
             await Task.CompletedTask;
         }
 
-        public async Task<bool> UpdateJob(CancellationToken ct)
+        private async Task UpdateJob(CancellationToken ct)
         {
             try
             {
-                var response = await rpcClient.ExecuteAsync<GetMiningInfoResponse>(logger, ETPCommands.GetMiningInfo, ct);
-                if (response?.Response == null)
+                var response = await rpcClient.ExecuteAsync<GetBlockTemplateResponse>(logger,
+                    ETPCommands.GetBlockTemplate, ct);
+
+                if (response.Error != null)
                 {
-                    logger.Warn("Unable to update job. Daemon returned empty response.");
-                    return false;
+                    logger.Error(() => $"Error(s) updating job: {response.Error.Message}");
+                    return;
                 }
 
-                var jobId = NextJobId();
-                var workResponse = await rpcClient.ExecuteAsync<string>(logger, ETPCommands.GetWork, ct);
-                var blockHex = workResponse?.Response ?? string.Empty;
-                
-                var job = new ETPJob(
-                    jobId,
-                    response.Response.Height.ToString(),  // используем высоту как prevHash
-                    blockHex,                            // используем шаблон блока из getwork
-                    response.Response.Difficulty,
-                    extraNonceProvider.Next(),
-                    "",
-                    DateTime.UtcNow.ToString("yyyyMMddHHmmss"),
-                    true,
-                    response.Response.Height
-                );
+                // Generate extra nonce values
+                response.Response.ExtraNonce1 = extraNonceProvider.Next();
+                response.Response.ExtraNonce2 = DateTime.UtcNow.ToString("yyyyMMddHHmmss");
 
-                lock (jobLock)
-                {
-                    if (currentJob == null || job.Height > currentJob.Height)
-                    {
-                        currentJob = job;
-                        jobSubject.OnNext(job);
-                        return true;
-                    }
-                }
+                var job = currentJob = new ETPJob(response.Response, response.Response.Height, response.Response.Difficulty);
 
-                return false;
+                jobSubject.OnNext(job);
             }
-            catch (Exception ex)
+            catch(Exception ex)
             {
-                logger.Error(ex.Message);
-                return false;
+                logger.Error(ex, () => "Error(s) updating job");
             }
         }
 

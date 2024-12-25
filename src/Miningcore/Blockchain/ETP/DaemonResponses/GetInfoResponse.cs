@@ -14,7 +14,7 @@ namespace Miningcore.Blockchain.ETP.DaemonResponses
         public double HashRate { get; set; }
 
         [JsonProperty("height")]
-        public long Height { get; set; }
+        public int Height { get; set; }
 
         [JsonProperty("is_mining")]
         public bool IsMining { get; set; }
