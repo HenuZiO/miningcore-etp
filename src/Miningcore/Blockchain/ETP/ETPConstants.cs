@@ -1,104 +1,71 @@
-using System.Numerics;
-using System.Text.RegularExpressions;
+using System;
 
-namespace Miningcore.Blockchain.ETP;
-
-public class EthereumConstants
+namespace Miningcore.Blockchain.ETP
 {
-    public const ulong EpochLength = 30000;
-    public const ulong CacheSizeForTesting = 1024;
-    public const ulong DagSizeForTesting = 1024 * 32;
-    public static BigInteger BigMaxValue = BigInteger.Pow(2, 256);
-    public static double Pow2x32 = Math.Pow(2, 32);
-    public static BigInteger BigPow2x32 = new(Pow2x32);
-    public const int AddressLength = 20;
-    public const decimal Wei = 1000000000000000000;
-    public static BigInteger WeiBig = new(1000000000000000000);
-    public const string EthereumStratumVersion = "EthereumStratum/1.0.0";
-    public const decimal StaticTransactionFeeReserve = 0.0025m; // in ETH
-    public const string BlockTypeUncle = "uncle";
-    public const string BlockTypeBlock = "block";
+    public class ETPConstants
+    {
+        public const string ETPStratumVersion = "EthereumStratum/1.0.0";  // Changed to Ethereum compatible
+        public const decimal MinimumDifficulty = 0.001m;
+        public const string DifficultyUnit = "MH";
+        
+        public const int MinConfirmations = 60;
+        
+        public const decimal StaticTransactionFeeReserve = 0.0001m; // ETP
+        public const decimal TransactionFeeReserve = 0.0001m; // ETP
+        
+        public const string RpcGetWork = "getwork";
+        public const string RpcSubmitWork = "submitwork";
+        public const string RpcGetBlockTemplate = "getblocktemplate";
+        public const string RpcGetMiningInfo = "getmininginfo";
+        
+        public static readonly System.Numerics.BigInteger BigMaxValue = System.Numerics.BigInteger.Pow(2, 256);
 
-#if !DEBUG
-    public const int MinPayoutPeerCount = 1;
-#else
-    public const int MinPayoutPeerCount = 1;
-#endif
+        // Константы для расчета хешрейта
+        public const double ShareMultiplier = 8192.0; // Множитель для ETP
+        public const int TargetBlockTime = 30;  // Блок каждые 30 секунд
+        // Множитель для расчета хешрейта из сложности
+        // 2^32 = 4294967296
+        public const double HashRateMultiplier = 4294967296.0;
+        public const int DifficultyAdjustmentInterval = 2016; // blocks
 
-    public static readonly Regex ValidAddressPattern = new("^0x[0-9a-fA-F]{40}$", RegexOptions.Compiled);
-    public static readonly Regex ZeroHashPattern = new("^0?x?0+$", RegexOptions.Compiled);
+        public const uint ShareMultiplierRpc = 256;
+        public const string DaemonRpcLocation = "/rpc/v3";
+        public const string EthereumStratumVersion = "EthereumStratum/1.0.0";
 
-    public const ulong ByzantiumHardForkHeight = 4370000;
-    public const ulong ConstantinopleHardForkHeight = 7280000;
-    public const decimal HomesteadBlockReward = 5.0m;
-    public const decimal ByzantiumBlockReward = 3.0m;
-    public const decimal ConstantinopleReward = 2.0m;
+        public static class RpcMethods
+        {
+            public const string GetMiningInfo = "getmininginfo";
+            public const string GetPeerInfo = "getpeerinfo";
+            public const string GetWork = "getwork";
+            public const string SubmitWork = "submitwork";
+            public const string ValidateAddress = "validateaddress";
+        }
 
-    public const int MinConfimations = 16;
+        public static class StratumMethods
+        {
+            // Standard Stratum Methods
+            public const string Subscribe = "mining.subscribe";
+            public const string Authorize = "mining.authorize";
+            public const string SubmitShare = "mining.submit";
+            public const string ExtraNonceSubscribe = "mining.extranonce.subscribe";
+            public const string SetDifficulty = "mining.set_difficulty";
+            public const string MiningNotify = "mining.notify";
 
-    public const string RpcRequestWorkerPropertyName = "worker";
-}
+            // Ethereum Stratum Methods
+            public const string EthSubmitLogin = "eth_submitLogin";
+            public const string EthGetWork = "eth_getWork";
+            public const string EthSubmitWork = "eth_submitWork";
+            public const string EthSubmitHashrate = "eth_submitHashrate";
+        }
 
-// Callisto Monetary Policy
-// https://github.com/EthereumCommonwealth/Roadmap/issues/56
-public class CallistoConstants
-{
-    public const decimal BaseRewardInitial = 77.76m;
-    public const decimal TreasuryPercent = 50m;
-}
+        // Stratum constants
+        public const string StratumSubscribe = "mining.subscribe";
+        public const string StratumAuthorize = "mining.authorize";
+        public const string StratumSubmit = "mining.submit";
+        public const string DifficultyNotification = "mining.set_difficulty";
+        public const string JobNotification = "mining.notify";
 
-public class EthOneConstants
-{
-    public const decimal BaseRewardInitial = 2.0m;
-}
-
-public class PinkConstants
-{
-    public const decimal BaseRewardInitial = 1.0m;
-}
-
-public enum EthereumNetworkType
-{
-    Main = 1,
-    Ropsten = 3,
-    Callisto = 820,
-    MainPow = 10001,
-    EtherOne = 4949,
-    Pink = 10100,
-
-    Unknown = -1,
-}
-
-public enum GethChainType
-{
-    Main,
-    Ropsten,
-    Callisto,
-    MainPow = 10001,
-    EtherOne = 4949,
-    Pink = 10100,
-    
-    Unknown = -1,
-}
-
-public static class EthCommands
-{
-    public const string GetWork = "eth_getWork";
-    public const string SubmitWork = "eth_submitWork";
-    public const string Sign = "eth_sign";
-    public const string GetNetVersion = "net_version";
-    public const string GetClientVersion = "web3_clientVersion";
-    public const string GetCoinbase = "eth_coinbase";
-    public const string GetAccounts = "eth_accounts";
-    public const string GetPeerCount = "net_peerCount";
-    public const string GetSyncState = "eth_syncing";
-    public const string GetBlockNumber = "eth_blockNumber";
-    public const string GetBlockByNumber = "eth_getBlockByNumber";
-    public const string GetBlockByHash = "eth_getBlockByHash";
-    public const string GetUncleByBlockNumberAndIndex = "eth_getUncleByBlockNumberAndIndex";
-    public const string GetTxReceipt = "eth_getTransactionReceipt";
-    public const string SendTx = "eth_sendTransaction";
-    public const string UnlockAccount = "personal_unlockAccount";
-    public const string Subscribe = "eth_subscribe";
-    public const string MaxPriorityFeePerGas = "eth_maxPriorityFeePerGas";
+        // Extra nonce size in bytes
+        public const int ExtraNonceBytes = 4;
+    }
 }

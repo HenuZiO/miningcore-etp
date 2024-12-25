@@ -56,6 +56,13 @@ public class StatsRecorder : BackgroundService
         cleanupDays  = TimeSpan.FromDays(clusterConfig.Statistics?.CleanupDays ?? 180);
 
         BuildFaultHandlingPolicy();
+
+        // Subscribe to events
+        messageBus.Listen<PoolStatusNotification>()
+            .Subscribe(x => OnPoolStatusNotification(x));
+
+        messageBus.Listen<BlockchainStatsUpdatedEvent>()
+            .Subscribe(x => OnBlockchainStatsUpdated(x));
     }
 
     private readonly IMasterClock clock;
@@ -366,6 +373,68 @@ public class StatsRecorder : BackgroundService
     private static void OnPolicyRetry(Exception ex, int retry, object context)
     {
         logger.Warn(() => $"Retry {retry} due to {ex.Source}: {ex.GetType().Name} ({ex.Message})");
+    }
+
+    private async void OnBlockchainStatsUpdated(BlockchainStatsUpdatedEvent notification)
+    {
+        if (string.IsNullOrEmpty(notification.PoolId))
+        {
+            logger.Error(() => "Received blockchain stats update event with null or empty PoolId");
+            return;
+        }
+
+        logger.Debug(() => $"[{notification.PoolId}] Received blockchain stats update event with values: Height={notification.BlockHeight}, Difficulty={notification.NetworkDifficulty}, HashRate={notification.NetworkHashrate}, Peers={notification.ConnectedPeers}");
+
+        if (!pools.TryGetValue(notification.PoolId, out var pool))
+        {
+            logger.Debug(() => $"[{notification.PoolId}] Pool not found for blockchain stats update. Current pools: {string.Join(", ", pools.Keys)}");
+            return;
+        }
+
+        var stats = pool.NetworkStats;
+        if (stats == null)
+        {
+            logger.Debug(() => $"[{notification.PoolId}] NetworkStats is null for pool");
+            return;
+        }
+
+        logger.Debug(() => $"[{notification.PoolId}] Found pool, current network stats: Height={stats.BlockHeight}, Difficulty={stats.NetworkDifficulty}, HashRate={stats.NetworkHashrate}, Peers={stats.ConnectedPeers}");
+
+        // Обновляем статистику в памяти через существующий объект
+        stats.NetworkHashrate = notification.NetworkHashrate;
+        stats.NetworkDifficulty = notification.NetworkDifficulty;
+        stats.BlockHeight = notification.BlockHeight;
+        stats.ConnectedPeers = notification.ConnectedPeers;
+
+        logger.Debug(() => $"[{notification.PoolId}] Updated network stats in memory: Height={stats.BlockHeight}, Difficulty={stats.NetworkDifficulty}, HashRate={stats.NetworkHashrate}, Peers={stats.ConnectedPeers}");
+
+        try
+        {
+            // Сохраняем в базу данных
+            await cf.RunTx(async (con, tx) =>
+            {
+                var dbStats = new Persistence.Model.PoolStats
+                {
+                    PoolId = notification.PoolId,
+                    Created = clock.Now,
+                    BlockHeight = (long)notification.BlockHeight,
+                    NetworkDifficulty = notification.NetworkDifficulty,
+                    NetworkHashrate = notification.NetworkHashrate,
+                    ConnectedPeers = notification.ConnectedPeers
+                };
+
+                logger.Debug(() => $"[{notification.PoolId}] Mapped stats for database: Height={dbStats.BlockHeight}, Difficulty={dbStats.NetworkDifficulty}, HashRate={dbStats.NetworkHashrate}, Peers={dbStats.ConnectedPeers}");
+
+                await statsRepo.InsertPoolStatsAsync(con, tx, dbStats, CancellationToken.None);
+                logger.Debug(() => $"[{notification.PoolId}] Successfully inserted stats into database");
+            });
+
+            logger.Info(() => $"[{notification.PoolId}] Updated and persisted network stats - Height: {notification.BlockHeight}, Difficulty: {notification.NetworkDifficulty}, HashRate: {notification.NetworkHashrate} H/s, Peers: {notification.ConnectedPeers}");
+        }
+        catch (Exception ex)
+        {
+            logger.Error(ex, () => $"[{notification.PoolId}] Error updating network stats");
+        }
     }
 
     protected override async Task ExecuteAsync(CancellationToken ct)

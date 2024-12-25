@@ -1,151 +1,93 @@
+using System;
+using System.Collections.Generic;
 using System.Globalization;
-using System.Numerics;
-using Miningcore.Crypto.Hashing.Ethash;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using Miningcore.Configuration;
 using Miningcore.Extensions;
 using Miningcore.Stratum;
 using NBitcoin;
+using Newtonsoft.Json;
 using NLog;
+using Miningcore.Blockchain.ETP.DaemonResponses;
 
-namespace Miningcore.Blockchain.ETP;
-
-public class EthereumJob
+namespace Miningcore.Blockchain.ETP
 {
-    public EthereumJob(string id, EthereumBlockTemplate blockTemplate, ILogger logger)
+    public class ETPJob
     {
-        Id = id;
-        BlockTemplate = blockTemplate;
-        this.logger = logger;
+        public string Id { get; }
+        public string PrevHash { get; }
+        public string HeaderHash { get; set; }  // Current block header hash
+        public string SeedHash { get; set; }    // Seed hash for DAG
+        public string ShareTarget { get; set; }  // Target for shares
+        public string BlockTemplate { get; }
+        public double Difficulty { get; set; }
+        public string ExtraNonce1 { get; }
+        public string ExtraNonce2 { get; }
+        public string NTime { get; }
+        public bool IsNew { get; }
+        public int Height { get; }
 
-        var target = blockTemplate.Target;
-        if(target.StartsWith("0x"))
-            target = target.Substring(2);
-
-        blockTarget = new uint256(target.HexToReverseByteArray());
-    }
-
-    private readonly Dictionary<string, HashSet<string>> workerNonces = new();
-
-    public string Id { get; }
-    public EthereumBlockTemplate BlockTemplate { get; }
-    private readonly uint256 blockTarget;
-    private readonly ILogger logger;
-
-    public record SubmitResult(Share Share, string FullNonceHex = null, string HeaderHash = null, string MixHash = null);
-
-    private void RegisterNonce(StratumConnection worker, string nonce)
-    {
-        var nonceLower = nonce.ToLower();
-
-        if(!workerNonces.TryGetValue(worker.ConnectionId, out var nonces))
+        public ETPJob(string id, string prevHash, string blockTemplate, double difficulty,
+            string extraNonce1, string extraNonce2, string nTime, bool isNew, int height)
         {
-            nonces = new HashSet<string>(new[] { nonceLower });
-            workerNonces[worker.ConnectionId] = nonces;
+            Id = id;
+            PrevHash = prevHash;
+            BlockTemplate = blockTemplate;
+            Difficulty = difficulty;
+            ExtraNonce1 = extraNonce1;
+            ExtraNonce2 = extraNonce2;
+            NTime = nTime;
+            IsNew = isNew;
+            Height = height;
+
+            // Для GetWork протокола
+            HeaderHash = blockTemplate;  // Текущий хеш блока
+            SeedHash = prevHash;         // Предыдущий хеш как seed
+            ShareTarget = "0x" + ((ulong)difficulty).ToString("x16", CultureInfo.InvariantCulture).PadLeft(64, '0');  // 32 байта в hex
+
+            // Для Stratum V1.0 нужны все поля выше
         }
 
-        else
+        // Получить параметры для GetWork
+        public object[] GetWorkParams()
         {
-            if(nonces.Contains(nonceLower))
-                throw new StratumException(StratumError.MinusOne, "duplicate share");
-
-            nonces.Add(nonceLower);
-        }
-    }
-
-    public async Task<SubmitResult> ProcessShareAsync(StratumConnection worker,
-        string workerName, string fullNonceHex, EthashFull ethash, CancellationToken ct)
-    {
-        // dupe check
-        lock(workerNonces)
-        {
-            RegisterNonce(worker, fullNonceHex);
-        }
-
-        var context = worker.ContextAs<EthereumWorkerContext>();
-
-        if(!ulong.TryParse(fullNonceHex, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var fullNonce))
-            throw new StratumException(StratumError.MinusOne, "bad nonce " + fullNonceHex);
-
-        // get dag for block
-        var dag = await ethash.GetDagAsync(BlockTemplate.Height, logger, CancellationToken.None);
-
-        // compute
-        if(!dag.Compute(logger, BlockTemplate.Header.HexToByteArray(), fullNonce, out var mixDigest, out var resultBytes))
-            throw new StratumException(StratumError.MinusOne, "bad hash");
-
-        // test if share meets at least workers current difficulty
-        resultBytes.ReverseInPlace();
-        var resultValue = new uint256(resultBytes);
-        var resultValueBig = resultBytes.AsSpan().ToBigInteger();
-        var shareDiff = (double) BigInteger.Divide(EthereumConstants.BigMaxValue, resultValueBig) / EthereumConstants.Pow2x32;
-        var stratumDifficulty = context.Difficulty;
-        var ratio = shareDiff / stratumDifficulty;
-        var isBlockCandidate = resultValue <= blockTarget;
-
-        if(!isBlockCandidate && ratio < 0.99)
-        {
-            // check if share matched the previous difficulty from before a vardiff retarget
-            if(context.VarDiff?.LastUpdate != null && context.PreviousDifficulty.HasValue)
+            return new object[]
             {
-                ratio = shareDiff / context.PreviousDifficulty.Value;
-
-                if(ratio < 0.99)
-                    throw new StratumException(StratumError.LowDifficultyShare, $"low difficulty share ({shareDiff})");
-
-                // use previous difficulty
-                stratumDifficulty = context.PreviousDifficulty.Value;
-            }
-
-            else
-                throw new StratumException(StratumError.LowDifficultyShare, $"low difficulty share ({shareDiff})");
+                HeaderHash,    // текущий хеш блока
+                SeedHash,     // seed хеш
+                ShareTarget   // цель
+            };
         }
 
-        var share = new Share
+        // Получить параметры для Stratum notify
+        public object[] GetStratumParams()
         {
-            BlockHeight = (long) BlockTemplate.Height,
-            IpAddress = worker.RemoteEndpoint?.Address?.ToString(),
-            Miner = context.Miner,
-            Worker = workerName,
-            UserAgent = context.UserAgent,
-            IsBlockCandidate = isBlockCandidate,
-            Difficulty = stratumDifficulty * EthereumConstants.Pow2x32
-        };
-
-        if(share.IsBlockCandidate)
-        {
-            fullNonceHex = "0x" + fullNonceHex;
-            var headerHash = BlockTemplate.Header;
-            var mixHash = mixDigest.ToHexString(true);
-
-            share.TransactionConfirmationData = "";
-
-            return new SubmitResult(share, fullNonceHex, headerHash, mixHash);
+            return new object[]
+            {
+                Id,           // id работы
+                PrevHash,     // предыдущий хеш
+                ExtraNonce1,  // экстра нонс 1
+                ExtraNonce2,  // экстра нонс 2
+                NTime,        // время
+                true         // clean jobs
+            };
         }
 
-        return new SubmitResult(share);
-    }
-
-    public object[] GetJobParamsForStratum()
-    {
-        return new object[]
+        // Получить параметры для Stratum
+        public object[] GetJobParamsForStratum()
         {
-            Id,
-            BlockTemplate.Seed.StripHexPrefix(),
-            BlockTemplate.Header.StripHexPrefix(),
-            true
-        };
-    }
-
-    public object[] GetWorkParamsForStratum(EthereumWorkerContext context)
-    {
-        // https://github.com/edsonayllon/Stratum-Implementation-For-Pantheon
-        var workerTarget = BigInteger.Divide(EthereumConstants.BigMaxValue, new BigInteger(context.Difficulty * EthereumConstants.Pow2x32));
-        var workerTargetString = workerTarget.ToByteArray(false, true).ToHexString(true);
-
-        return new object[]
-        {
-            BlockTemplate.Header,
-            BlockTemplate.Seed,
-            workerTargetString,
-        };
+            return new object[]
+            {
+                Id,                  // Job ID
+                HeaderHash,          // Current block header hash
+                SeedHash,           // Seed hash for DAG
+                ShareTarget,        // Target for shares
+                true,              // Clean jobs
+                Height,           // Block height
+                Difficulty       // Difficulty
+            };
+        }
     }
 }

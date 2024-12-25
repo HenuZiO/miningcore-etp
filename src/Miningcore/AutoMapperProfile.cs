@@ -80,6 +80,18 @@ public class AutoMapperProfile : Profile
         CreateMap<MinerWorkerPerformanceStats, Persistence.Postgres.Entities.MinerWorkerPerformanceStats>()
             .ForMember(dest => dest.Id, opt => opt.Ignore());
 
+        CreateMap<BlockchainStats, Persistence.Model.PoolStats>()
+            .ForMember(dest => dest.BlockHeight, opt => opt.MapFrom(src => (long)src.BlockHeight))
+            .ForMember(dest => dest.NetworkHashrate, opt => opt.MapFrom(src => src.NetworkHashrate))
+            .ForMember(dest => dest.NetworkDifficulty, opt => opt.MapFrom(src => src.NetworkDifficulty))
+            .ForMember(dest => dest.ConnectedPeers, opt => opt.MapFrom(src => src.ConnectedPeers));
+
+        CreateMap<Persistence.Model.PoolStats, BlockchainStats>()
+            .ForMember(dest => dest.BlockHeight, opt => opt.MapFrom(src => (ulong)src.BlockHeight))
+            .ForMember(dest => dest.NetworkHashrate, opt => opt.MapFrom(src => src.NetworkHashrate))
+            .ForMember(dest => dest.NetworkDifficulty, opt => opt.MapFrom(src => src.NetworkDifficulty))
+            .ForMember(dest => dest.ConnectedPeers, opt => opt.MapFrom(src => src.ConnectedPeers));
+
         //////////////////////
         // incoming mappings
 

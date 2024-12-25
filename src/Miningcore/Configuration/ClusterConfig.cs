@@ -30,6 +30,9 @@ public enum CoinFamily
 
     [EnumMember(Value = "ergo")]
     Ergo,
+
+    [EnumMember(Value = "etp")]
+    ETP,
 }
 
 public abstract partial class CoinTemplate
@@ -132,6 +135,7 @@ public abstract partial class CoinTemplate
         {CoinFamily.Cryptonote, typeof(CryptonoteCoinTemplate)},
         {CoinFamily.Ethereum, typeof(EthereumCoinTemplate)},
         {CoinFamily.Ergo, typeof(ErgoCoinTemplate)},
+        {CoinFamily.ETP, typeof(ETPCoinTemplate)},
     };
 }
 

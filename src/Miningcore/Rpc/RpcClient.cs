@@ -144,7 +144,10 @@ public class RpcClient
         var requestUrl = $"{protocol}://{endPoint.Host}:{endPoint.Port}";
 
         if(!string.IsNullOrEmpty(endPoint.HttpPath))
-            requestUrl += $"{(endPoint.HttpPath.StartsWith("/") ? string.Empty : "/")}{endPoint.HttpPath}";
+        {
+            var path = endPoint.HttpPath.TrimStart('/');
+            requestUrl += $"/{path}";
+        }
 
         using(var request = new HttpRequestMessage(HttpMethod.Post, requestUrl))
         {
@@ -164,7 +167,7 @@ public class RpcClient
                 request.Headers.Authorization = new AuthenticationHeaderValue("Basic", auth.ToByteArrayBase64());
             }
 
-            logger.Trace(() => $"Sending RPC request to {requestUrl}: {json}");
+            logger.Debug(() => $"Sending RPC request to {requestUrl}: {json}");
 
             // send request
             using(var response = await httpClient.SendAsync(request, ct))
@@ -172,7 +175,7 @@ public class RpcClient
                 // read response
                 var responseContent = await response.Content.ReadAsStringAsync(ct);
 
-                logger.Trace(() => $"Received RPC response: {responseContent}");
+                logger.Debug(() => $"Received RPC response: {responseContent}");
 
                 // deserialize response
                 using(var jreader = new JsonTextReader(new StringReader(responseContent)))
@@ -198,7 +201,10 @@ public class RpcClient
         var requestUrl = $"{protocol}://{endPoint.Host}:{endPoint.Port}";
 
         if(!string.IsNullOrEmpty(endPoint.HttpPath))
-            requestUrl += $"{(endPoint.HttpPath.StartsWith("/") ? string.Empty : "/")}{endPoint.HttpPath}";
+        {
+            var path = endPoint.HttpPath.TrimStart('/');
+            requestUrl += $"/{path}";
+        }
 
         using(var request = new HttpRequestMessage(HttpMethod.Post, requestUrl))
         {
@@ -218,7 +224,7 @@ public class RpcClient
                 request.Headers.Authorization = new AuthenticationHeaderValue("Basic", auth.ToByteArrayBase64());
             }
 
-            logger.Trace(() => $"Sending RPC request to {requestUrl}: {json}");
+            logger.Debug(() => $"Sending RPC request to {requestUrl}: {json}");
 
             // send request
             using(var response = await httpClient.SendAsync(request, ct))
@@ -226,7 +232,7 @@ public class RpcClient
                 // deserialize response
                 var responseContent = await response.Content.ReadAsStringAsync(ct);
 
-                logger.Trace(() => $"Received RPC response: {responseContent}");
+                logger.Debug(() => $"Received RPC response: {responseContent}");
 
                 using(var jreader = new JsonTextReader(new StringReader(responseContent)))
                 {

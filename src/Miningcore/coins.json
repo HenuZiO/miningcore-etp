@@ -63,6 +63,8 @@
         "blockTemplateRpcExtraParams": [
             "sha256d"
         ],
+        "hasFounderFee": true,
+        "hasMasterNodes": true,
         "explorerBlockLink": "https://chainz.cryptoid.info/aur/block.dws?$height$.htm",
         "explorerTxLink": "https://chainz.cryptoid.info/aur/tx.dws?{0}.htm",
         "explorerAccountLink": "https://chainz.cryptoid.info/aur/address.dws?{0}.htm"
@@ -95,10 +97,21 @@
                 }
             ]
         },
-        "blockTemplateRpcExtraParams": [
-            "scrypt"
-        ],
+        "posBlockHasher": {
+            "hash": "reverse",
+            "args": [
+                {
+                    "hash": "scrypt",
+                    "args": [
+                        1024,
+                        1
+                    ]
+                }
+            ]
+        },
         "shareMultiplier": 65536,
+        "hasFounderFee": true,
+        "hasMasterNodes": true,
         "explorerBlockLink": "https://chainz.cryptoid.info/aur/block.dws?$height$.htm",
         "explorerTxLink": "https://chainz.cryptoid.info/aur/tx.dws?{0}.htm",
         "explorerAccountLink": "https://chainz.cryptoid.info/aur/address.dws?{0}.htm"
@@ -1205,10 +1218,9 @@
         "explorerTxLink": "https://livenet.flocha.in/tx/{0}",
         "explorerAccountLink": "https://livenet.flocha.in/address/{0}"
     },
-    "foxdcoin": {
-        "name": "FoxDcoin",
-        "canonicalName": "FoxDcoin",
-        "symbol": "FOXD",
+    "foxcoin": {
+        "name": "Foxcoin",
+        "symbol": "FOX",
         "family": "bitcoin",
         "website": "",
         "market": "",
@@ -1238,9 +1250,9 @@
             ]
         },
         "shareMultiplier": 4096,
-        "explorerBlockLink": "https://explorer.foxdcoin.com/block-height/$height$",
-        "explorerTxLink": "https://explorer.foxdcoin.com/tx/{0}",
-        "explorerAccountLink": "https://explorer.foxdcoin.com/address/{0}"
+        "explorerBlockLink": "https://explorer.foxcoin.com/block-height/$height$",
+        "explorerTxLink": "https://explorer.foxcoin.com/tx/{0}",
+        "explorerAccountLink": "https://explorer.foxcoin.com/address/{0}"
     },
     "freecash": {
         "name": "Free Cash",
@@ -3391,7 +3403,7 @@
     },
     "bitcoin-gold": {
         "name": "Bitcoin Gold",
-        "canonicalName": "Bitcoin Gold",
+        "canonicalName": "Bitcoin-Gold",
         "symbol": "BTG",
         "family": "equihash",
         "website": "https://bitcoingold.org/",
@@ -4338,5 +4350,26 @@
         "explorerBlockLink": "https://explorer.ergoplatform.com/en/blocks/$hash$",
         "explorerTxLink": "https://explorer.ergoplatform.com/en/transactions/{0}",
         "explorerAccountLink": "https://explorer.ergoplatform.com/en/addresses/{0}"
+    },
+    "metaverse": {
+        "name": "Metaverse",
+        "symbol": "ETP",
+        "family": "etp",
+        "website": "https://mvs.org/",
+        "coinbaseHasher": {
+            "hash": "sha256d"
+        },
+        "headerHasher": {
+            "hash": "ethash"
+        },
+        "nValue": 1024,
+        "rValue": 1,
+        "txfee": 0.0001,
+        "payoutScheme": "PPLNS",
+        "payoutSchemeConfig": {
+            "factor": 2.0
+        },
+        "explorerBlockLink": "https://explorer.mvs.org/block/{0}",
+        "explorerTxLink": "https://explorer.mvs.org/tx/{0}"
     }
 }

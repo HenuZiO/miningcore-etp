@@ -1,5 +1,10 @@
 namespace Miningcore.Blockchain;
 
+public interface IBlockchainStats
+{
+    BlockchainStats BlockchainStats { get; }
+}
+
 public class BlockchainStats
 {
     public string NetworkType { get; set; }

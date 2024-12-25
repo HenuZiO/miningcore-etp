@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Globalization;
 using System.Net;
+using System.Net.Sockets;
 using System.Reactive.Disposables;
 using System.Reactive.Linq;
 using System.Text.RegularExpressions;
@@ -339,9 +340,29 @@ public abstract class PoolBase : StratumServer,
         return new StratumEndpoint(new IPEndPoint(listenAddress, port), pep);
     }
 
+    private void SetupSocket(Socket socket)
+    {
+        socket.NoDelay = true;
+        socket.ReceiveTimeout = poolConfig.ClientConnectionTimeout * 1000;
+        socket.SendTimeout = poolConfig.ClientConnectionTimeout * 1000;
+        socket.LingerState = new LingerOption(true, 0);
+        
+        // Включаем keepalive
+        socket.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.KeepAlive, true);
+        socket.SetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.TcpKeepAliveTime, 30);  // 30 секунд до первого keepalive
+        socket.SetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.TcpKeepAliveInterval, 5);  // Повтор каждые 5 секунд
+        socket.SetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.TcpKeepAliveRetryCount, 5);  // 5 попыток
+    }
+
     private void LogPoolInfo()
     {
         logger.Info(() => "Pool Online");
+
+        if(blockchainStats == null)
+        {
+            logger.Error(() => "BlockchainStats is null");
+            return;
+        }
 
         var msg = $@"
 

@@ -6,6 +6,7 @@ using Miningcore.Blockchain.Bitcoin;
 using Miningcore.Blockchain.Cryptonote;
 using Miningcore.Blockchain.Equihash;
 using Miningcore.Blockchain.Ethereum;
+using Miningcore.Blockchain.ETP;
 using Miningcore.Configuration;
 using Miningcore.Crypto;
 using Miningcore.Crypto.Hashing.Equihash;
@@ -96,6 +97,14 @@ public class AutofacModule : Module
             .SingleInstance();
 
         builder.RegisterType<NicehashService>()
+            .SingleInstance();
+
+        builder.RegisterType<ETPExtraNonceProvider>()
+            .AsImplementedInterfaces()
+            .SingleInstance();
+
+        builder.RegisterType<ETPJobManager>()
+            .AsSelf()
             .SingleInstance();
 
         builder.RegisterType<PushoverClient>()

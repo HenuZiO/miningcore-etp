@@ -1,26 +1,33 @@
+using System;
 using Miningcore.Mining;
 
-namespace Miningcore.Blockchain.ETP;
-
-public class EthereumWorkerContext : WorkerContextBase
+namespace Miningcore.Blockchain.ETP
 {
-    /// <summary>
-    /// Usually a wallet address
-    /// </summary>
-    public string Miner { get; set; }
+    public class ETPWorkerContext : WorkerContextBase
+    {
+        public string ExtraNonce1;
+        public string CurrentDifficulty;
+        public ulong Hashrate { get; set; }
+        public DateTime? LastShare { get; set; }
+        public int ValidShares { get; set; }
+        public int InvalidShares { get; set; }
+        public string Miner { get; set; }  // Адрес майнера
+        public string Worker { get; set; }  // Имя воркера
+        public ETPJob CurrentJob { get; set; }
 
-    /// <summary>
-    /// Arbitrary worker identififer for miners using multiple rigs
-    /// </summary>
-    public string Worker { get; set; }
+        public void UpdateShare(bool valid)
+        {
+            LastShare = DateTime.UtcNow;
+            if (valid)
+                ValidShares++;
+            else
+                InvalidShares++;
+        }
+    }
 
-    /// <summary>
-    /// Stratum protocol version
-    /// </summary>
-    public int ProtocolVersion { get; set; }
-
-    /// <summary>
-    /// Unique value assigned per worker
-    /// </summary>
-    public string ExtraNonce1 { get; set; }
+    public class ETPWorkerJob
+    {
+        public ETPJob Job { get; set; }
+        public string Difficulty { get; set; }
+    }
 }

@@ -1,605 +1,209 @@
-using System.Globalization;
+using System;
 using System.Numerics;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Reactive;
+using System.Reactive.Subjects;
 using System.Reactive.Linq;
-using System.Reactive.Threading.Tasks;
-using System.Text;
+using System.Security.Cryptography;
+using System.Linq;
 using Autofac;
+using NLog;
 using Miningcore.Blockchain.Bitcoin;
-using Miningcore.Blockchain.ETP.Configuration;
-using Miningcore.Blockchain.ETP.DaemonResponses;
 using Miningcore.Configuration;
-using Miningcore.Crypto.Hashing.Ethash;
 using Miningcore.Extensions;
 using Miningcore.JsonRpc;
 using Miningcore.Messaging;
+using Miningcore.Mining;
 using Miningcore.Notifications.Messages;
+using Miningcore.Rpc;
 using Miningcore.Stratum;
 using Miningcore.Time;
+using Miningcore.Util;
 using Newtonsoft.Json;
-using NLog;
-using Block = Miningcore.Blockchain.ETP.DaemonResponses.Block;
 using Contract = Miningcore.Contracts.Contract;
-using EC = Miningcore.Blockchain.ETP.EthCommands;
-using static Miningcore.Util.ActionUtils;
-using System.Reactive;
-using Miningcore.Mining;
-using Miningcore.Rpc;
-using Newtonsoft.Json.Linq;
+using Miningcore.Blockchain.ETP.Configuration;
+using Miningcore.Blockchain.ETP.DaemonResponses;
 
-namespace Miningcore.Blockchain.ETP;
-
-public class EthereumJobManager : JobManagerBase<EthereumJob>
+namespace Miningcore.Blockchain.ETP
 {
-    public EthereumJobManager(
-        IComponentContext ctx,
-        IMasterClock clock,
-        IMessageBus messageBus,
-        IExtraNonceProvider extraNonceProvider) :
-        base(ctx, messageBus)
+    public class ETPJobManager : JobManagerBase<ETPJob>
     {
-        Contract.RequiresNonNull(ctx);
-        Contract.RequiresNonNull(clock);
-        Contract.RequiresNonNull(messageBus);
-        Contract.RequiresNonNull(extraNonceProvider);
+        private DaemonEndpointConfig[] daemonEndpoints;
+        private readonly IExtraNonceProvider extraNonceProvider;
+        private readonly ETPPoolConfigExtra extraPoolConfig;
+        private RpcClient rpcClient;
+        private readonly Subject<ETPJob> jobSubject = new Subject<ETPJob>();
+        public IObservable<ETPJob> Jobs => jobSubject.AsObservable();
 
-        this.clock = clock;
-        this.extraNonceProvider = extraNonceProvider;
-    }
-
-    private DaemonEndpointConfig[] daemonEndpoints;
-    private RpcClient rpc;
-    private EthereumNetworkType networkType;
-    private GethChainType chainType;
-    private EthashFull ethash;
-    private readonly IMasterClock clock;
-    private readonly IExtraNonceProvider extraNonceProvider;
-    private const int MaxBlockBacklog = 6;
-    protected readonly Dictionary<string, EthereumJob> validJobs = new();
-    private EthereumPoolConfigExtra extraPoolConfig;
-
-    protected async Task<bool> UpdateJob(CancellationToken ct, string via = null)
-    {
-        try
+        public ETPJobManager(
+            IComponentContext ctx,
+            IExtraNonceProvider extraNonceProvider,
+            IMessageBus messageBus) : base(ctx, messageBus)
         {
-            var bt = await GetBlockTemplateAsync(ct);
+            Contract.RequiresNonNull(ctx, nameof(ctx));
+            Contract.RequiresNonNull(extraNonceProvider, nameof(extraNonceProvider));
+            Contract.RequiresNonNull(messageBus, nameof(messageBus));
 
-            if(bt == null)
-                return false;
-
-            return UpdateJob(bt, via);
+            this.extraNonceProvider = extraNonceProvider;
+            
+            if (ctx.Resolve<PoolConfig>().Extra != null)
+                this.extraPoolConfig = ctx.Resolve<PoolConfig>().Extra.SafeExtensionDataAs<ETPPoolConfigExtra>();
         }
 
-        catch(OperationCanceledException)
+        public override void Configure(PoolConfig pc, ClusterConfig cc)
         {
-            // ignored
+            Contract.RequiresNonNull(pc);
+            Contract.RequiresNonNull(cc);
+
+            logger = LogUtil.GetPoolScopedLogger(typeof(ETPJobManager), pc);
+            poolConfig = pc;
+            clusterConfig = cc;
+
+            if (poolConfig.Daemons == null || poolConfig.Daemons.Length == 0)
+                throw new PoolStartupException("No daemons configured");
+
+            ConfigureDaemons();
         }
 
-        catch(Exception ex)
+        protected override void ConfigureDaemons()
         {
-            logger.Error(ex, () => $"Error during {nameof(UpdateJob)}");
-        }
-
-        return false;
-    }
-
-    protected bool UpdateJob(EthereumBlockTemplate blockTemplate, string via = null)
-    {
-        try
-        {
-            // may happen if daemon is currently not connected to peers
-            if(blockTemplate == null || blockTemplate.Header?.Length == 0)
-                return false;
-
-            var job = currentJob;
-            var isNew = currentJob == null ||
-                job.BlockTemplate.Height < blockTemplate.Height ||
-                job.BlockTemplate.Header != blockTemplate.Header;
-
-            if(isNew)
-            {
-                messageBus.NotifyChainHeight(poolConfig.Id, blockTemplate.Height, poolConfig.Template);
-
-                var jobId = NextJobId("x8");
-
-                // update template
-                job = new EthereumJob(jobId, blockTemplate, logger);
-
-                lock(jobLock)
-                {
-                    // add jobs
-                    validJobs[jobId] = job;
-
-                    // remove old ones
-                    var obsoleteKeys = validJobs.Keys
-                        .Where(key => validJobs[key].BlockTemplate.Height < job.BlockTemplate.Height - MaxBlockBacklog).ToArray();
-
-                    foreach(var key in obsoleteKeys)
-                        validJobs.Remove(key);
-                }
-
-                currentJob = job;
-
-                logger.Info(() => $"New work at height {currentJob.BlockTemplate.Height} and header {currentJob.BlockTemplate.Header} via [{(via ?? "Unknown")}]");
-
-                // update stats
-                BlockchainStats.LastNetworkBlockTime = clock.Now;
-                BlockchainStats.BlockHeight = job.BlockTemplate.Height;
-                BlockchainStats.NetworkDifficulty = job.BlockTemplate.Difficulty;
-                BlockchainStats.NextNetworkTarget = job.BlockTemplate.Target;
-                BlockchainStats.NextNetworkBits = "";
-            }
-
-            return isNew;
-        }
-
-        catch(OperationCanceledException)
-        {
-            // ignored
-        }
-
-        catch(Exception ex)
-        {
-            logger.Error(ex, () => $"Error during {nameof(UpdateJob)}");
-        }
-
-        return false;
-    }
-
-    private async Task<EthereumBlockTemplate> GetBlockTemplateAsync(CancellationToken ct)
-    {
-        var requests = new[]
-        {
-            new RpcRequest("getinfo")
-        };
-
-        var responses = await rpc.ExecuteBatchAsync(logger, ct, requests);
-
-        if(responses.Any(x => x.Error != null))
-        {
-            logger.Warn(() => $"Error(s) refreshing blocktemplate: {responses.First(x => x.Error != null).Error.Message}");
-            return null;
-        }
-
-        // extract results
-        var info = responses[0].Response.ToObject<JObject>();
-
-        if(info == null)
-            return null;
-
-        // extract values
-        var height = info["height"].Value<ulong>();
-        var difficulty = info["difficulty"].Value<ulong>();
-
-        var result = new EthereumBlockTemplate
-        {
-            Height = height,
-            Difficulty = difficulty
-        };
-
-        return result;
-    }
-
-    private async Task ShowDaemonSyncProgressAsync(CancellationToken ct)
-    {
-        var syncStateResponse = await rpc.ExecuteAsync<object>(logger, "getinfo", ct);
-
-        if(syncStateResponse.Error == null)
-        {
-            var info = syncStateResponse.Response.ToObject<JObject>();
-
-            if(info != null)
-            {
-                var height = info["height"].Value<ulong>();
-                var peers = info["peers"].Value<uint>();
-
-                logger.Info(() => $"Daemon is at block height {height} with {peers} peers");
-            }
-        }
-    }
-
-    private async Task UpdateNetworkStatsAsync(CancellationToken ct)
-    {
-        try
-        {
-            var infoResponse = await rpc.ExecuteAsync<object>(logger, "getinfo", ct);
-
-            if(infoResponse.Error == null)
-            {
-                var info = infoResponse.Response.ToObject<JObject>();
-
-                if(info != null)
-                {
-                    BlockchainStats.BlockHeight = info["height"].Value<ulong>();
-                    BlockchainStats.NetworkDifficulty = info["difficulty"].Value<ulong>();
-                    BlockchainStats.ConnectedPeers = info["peers"].Value<uint>();
-                }
-            }
-        }
-        catch(Exception ex)
-        {
-            logger.Error(ex);
-        }
-    }
-
-    private async Task<bool> SubmitBlockAsync(Share share, string fullNonceHex, string headerHash, string mixHash)
-    {
-        // submit work
-        var response = await rpc.ExecuteAsync<object>(logger, EC.SubmitWork, CancellationToken.None, new[]
-        {
-            fullNonceHex,
-            headerHash,
-            mixHash
-        });
-
-        if(response.Error != null || (bool?) response.Response == false)
-        {
-            var error = response.Error?.Message ?? response?.Response?.ToString();
-
-            logger.Warn(() => $"Block {share.BlockHeight} submission failed with: {error}");
-            messageBus.SendMessage(new AdminNotification("Block submission failed", $"Pool {poolConfig.Id} {(!string.IsNullOrEmpty(share.Source) ? $"[{share.Source.ToUpper()}] " : string.Empty)}failed to submit block {share.BlockHeight}: {error}"));
-
-            return false;
-        }
-
-        return true;
-    }
-
-    public object[] GetJobParamsForStratum()
-    {
-        var job = currentJob;
-
-        return job?.GetJobParamsForStratum() ?? Array.Empty<object>();
-    }
-
-    public object[] GetWorkParamsForStratum(EthereumWorkerContext context)
-    {
-        var job = currentJob;
-
-        return job?.GetWorkParamsForStratum(context) ?? Array.Empty<object>();
-    }
-
-    #region API-Surface
-
-    public IObservable<Unit> Jobs { get; private set; }
-
-    public override void Configure(PoolConfig pc, ClusterConfig cc)
-    {
-        extraPoolConfig = pc.Extra.SafeExtensionDataAs<EthereumPoolConfigExtra>();
-
-        // extract standard daemon endpoints
-        daemonEndpoints = pc.Daemons
-            .Where(x => string.IsNullOrEmpty(x.Category))
-            .ToArray();
-
-        base.Configure(pc, cc);
-
-        if(pc.EnableInternalStratum == true)
-        {
-            // ensure dag location is configured
-            var dagDir = !string.IsNullOrEmpty(extraPoolConfig?.DagDir) ?
-                Environment.ExpandEnvironmentVariables(extraPoolConfig.DagDir) :
-                Dag.GetDefaultDagDirectory();
-
-            // create it if necessary
-            Directory.CreateDirectory(dagDir);
-
-            // setup ethash
-            ethash = new EthashFull(3, dagDir);
-        }
-    }
-
-    public bool ValidateAddress(string address)
-    {
-        if(string.IsNullOrEmpty(address))
-            return false;
-
-        if(EthereumConstants.ZeroHashPattern.IsMatch(address) ||
-           !EthereumConstants.ValidAddressPattern.IsMatch(address))
-            return false;
-
-        return true;
-    }
-
-    public void PrepareWorker(StratumConnection client)
-    {
-        var context = client.ContextAs<EthereumWorkerContext>();
-        context.ExtraNonce1 = extraNonceProvider.Next();
-    }
-
-    public async Task<Share> SubmitShareV1Async(StratumConnection worker, string[] request, string workerName, CancellationToken ct)
-    {
-        Contract.RequiresNonNull(worker);
-        Contract.RequiresNonNull(request);
-
-        var context = worker.ContextAs<EthereumWorkerContext>();
-        var nonce = request[0];
-        var header = request[1];
-
-        EthereumJob job;
-
-        // stale?
-        lock(jobLock)
-        {
-            job = validJobs.Values.FirstOrDefault(x => x.BlockTemplate.Header.Equals(header));
-
-            if(job == null)
-                throw new StratumException(StratumError.MinusOne, "stale share");
-        }
-
-        return await SubmitShareAsync(worker, context, workerName, job, nonce.StripHexPrefix(), ct);
-    }
-
-    public async Task<Share> SubmitShareV2Async(StratumConnection worker, string[] request, CancellationToken ct)
-    {
-        Contract.RequiresNonNull(worker);
-        Contract.RequiresNonNull(request);
-
-        var context = worker.ContextAs<EthereumWorkerContext>();
-        var jobId = request[1];
-        var nonce = request[2];
-
-        EthereumJob job;
-
-        // stale?
-        lock(jobLock)
-        {
-            // look up job by id
-            if(!validJobs.TryGetValue(jobId, out job))
-                throw new StratumException(StratumError.MinusOne, "stale share");
-        }
-
-        // assemble full-nonce
-        var fullNonceHex = context.ExtraNonce1 + nonce;
-
-        return await SubmitShareAsync(worker, context, context.Worker, job, fullNonceHex, ct);
-    }
-
-    private async Task<Share> SubmitShareAsync(StratumConnection worker,
-        EthereumWorkerContext context, string workerName, EthereumJob job, string nonce, CancellationToken ct)
-    {
-        // validate & process
-        var (share, fullNonceHex, headerHash, mixHash) = await job.ProcessShareAsync(worker, workerName, nonce, ethash, ct);
-
-        // enrich share with common data
-        share.PoolId = poolConfig.Id;
-        share.NetworkDifficulty = BlockchainStats.NetworkDifficulty;
-        share.Source = clusterConfig.ClusterName;
-        share.Created = clock.Now;
-
-        // if block candidate, submit & check if accepted by network
-        if(share.IsBlockCandidate)
-        {
-            logger.Info(() => $"Submitting block {share.BlockHeight}");
-
-            share.IsBlockCandidate = await SubmitBlockAsync(share, fullNonceHex, headerHash, mixHash);
-
-            if(share.IsBlockCandidate)
-            {
-                logger.Info(() => $"Daemon accepted block {share.BlockHeight} submitted by {context.Miner}");
-
-                OnBlockFound();
-            }
-        }
-
-        return share;
-    }
-
-    public BlockchainStats BlockchainStats { get; } = new();
-
-    #endregion // API-Surface
-
-    #region Overrides
-
-    protected override void ConfigureDaemons()
-    {
-        var jsonSerializerSettings = ctx.Resolve<JsonSerializerSettings>();
-
-        rpc = new RpcClient(daemonEndpoints.First(), jsonSerializerSettings, messageBus, poolConfig.Id);
-    }
-
-    protected override async Task<bool> AreDaemonsHealthyAsync(CancellationToken ct)
-    {
-        var response = await rpc.ExecuteAsync<Block>(logger, EC.GetBlockByNumber, ct, new[] { (object) "latest", true });
-
-        return response.Error == null;
-    }
-
-    protected override async Task<bool> AreDaemonsConnectedAsync(CancellationToken ct)
-    {
-        var response = await rpc.ExecuteAsync<string>(logger, EC.GetPeerCount, ct);
-
-        return response.Error == null && response.Response.IntegralFromHex<uint>() > 0;
-    }
-
-    protected override async Task EnsureDaemonsSynchedAsync(CancellationToken ct)
-    {
-        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(5));
-
-        var syncPendingNotificationShown = false;
-
-        do
-        {
-            var syncStateResponse = await rpc.ExecuteAsync<object>(logger, EC.GetSyncState, ct);
-
-            var isSynched = syncStateResponse.Response is false;
-
-            if(isSynched)
-            {
-                logger.Info(() => "All daemons synched with blockchain");
-                break;
-            }
-
-            if(!syncPendingNotificationShown)
-            {
-                logger.Info(() => "Daemon is still syncing with network. Manager will be started once synced.");
-                syncPendingNotificationShown = true;
-            }
-
-            await ShowDaemonSyncProgressAsync(ct);
-        } while(await timer.WaitForNextTickAsync(ct));
-    }
-
-    protected override async Task PostStartInitAsync(CancellationToken ct)
-    {
-        var requests = new[]
-        {
-            new RpcRequest(EC.GetNetVersion),
-            new RpcRequest(EC.GetAccounts),
-            new RpcRequest(EC.GetCoinbase),
-        };
-
-        var responses = await rpc.ExecuteBatchAsync(logger, ct, requests);
-
-        if(responses.Any(x => x.Error != null))
-        {
-            var errors = responses.Take(3).Where(x => x.Error != null)
+            var daemonEndpoints = poolConfig.Daemons
+                .Where(x => string.IsNullOrEmpty(x.Category))
                 .ToArray();
 
-            if(errors.Any())
-                throw new PoolStartupException($"Init RPC failed: {string.Join(", ", errors.Select(y => y.Error.Message))}", poolConfig.Id);
+            if (daemonEndpoints.Length == 0)
+                throw new PoolStartupException("No daemons configured");
+
+            this.daemonEndpoints = daemonEndpoints;
+
+            rpcClient = new RpcClient(daemonEndpoints.First(), new JsonSerializerSettings(), messageBus, poolConfig.Id);
         }
 
-        // extract results
-        var netVersion = responses[0].Response.ToObject<string>();
-        // var accounts = responses[1].Response.ToObject<string[]>();
-        // var coinbase = responses[2].Response.ToObject<string>();
-        var gethChain = extraPoolConfig?.ChainTypeOverride ?? "Ethereum";
-
-        EthereumUtils.DetectNetworkAndChain(netVersion, gethChain, out networkType, out chainType);
-
-        // update stats
-        BlockchainStats.RewardType = "POW";
-        BlockchainStats.NetworkType = $"{chainType}-{networkType}";
-
-        await UpdateNetworkStatsAsync(ct);
-
-        // Periodically update network stats
-        Observable.Interval(TimeSpan.FromMinutes(10))
-            .Select(via => Observable.FromAsync(() =>
-                Guard(()=> UpdateNetworkStatsAsync(ct),
-                    ex=> logger.Error(ex))))
-            .Concat()
-            .Subscribe();
-
-        if(poolConfig.EnableInternalStratum == true)
+        protected override async Task<bool> AreDaemonsHealthyAsync(CancellationToken ct)
         {
-            // make sure we have a current DAG
-            using var timer = new PeriodicTimer(TimeSpan.FromSeconds(5));
-
-            do
-            {
-                var blockTemplate = await GetBlockTemplateAsync(ct);
-
-                if(blockTemplate != null)
-                {
-                    logger.Info(() => "Loading current DAG ...");
-
-                    await ethash.GetDagAsync(blockTemplate.Height, logger, ct);
-
-                    logger.Info(() => "Loaded current DAG");
-                    break;
-                }
-
-                logger.Info(() => "Waiting for first valid block template");
-            } while(await timer.WaitForNextTickAsync(ct));
+            var response = await rpcClient.ExecuteAsync<GetMiningInfoResponse>(logger, ETPCommands.GetMiningInfo, ct);
+            return response?.Error == null;
         }
 
-        await SetupJobUpdates(ct);
-    }
-
-    protected virtual async Task SetupJobUpdates(CancellationToken ct)
-    {
-        var pollingInterval = poolConfig.BlockRefreshInterval > 0 ? poolConfig.BlockRefreshInterval : 1000;
-
-        var blockSubmission = blockFoundSubject.Synchronize();
-        var pollTimerRestart = blockFoundSubject.Synchronize();
-
-        var triggers = new List<IObservable<(string Via, string Data)>>
+        protected override async Task<bool> AreDaemonsConnectedAsync(CancellationToken ct)
         {
-            blockSubmission.Select(_ => (JobRefreshBy.BlockFound, (string) null))
-        };
+            var response = await rpcClient.ExecuteAsync<string[]>(logger, ETPCommands.GetPeerInfo, ct);
+            return response?.Response?.Any() == true;
+        }
 
-        var endpointExtra = daemonEndpoints
-            .Where(x => x.Extra.SafeExtensionDataAs<EthereumDaemonEndpointConfigExtra>() != null)
-            .Select(x=> Tuple.Create(x, x.Extra.SafeExtensionDataAs<EthereumDaemonEndpointConfigExtra>()))
-            .FirstOrDefault();
-
-        if(endpointExtra?.Item2?.PortWs.HasValue == true)
+        protected override async Task EnsureDaemonsSynchedAsync(CancellationToken ct)
         {
-            var (endpointConfig, extra) = endpointExtra;
+            var response = await rpcClient.ExecuteAsync<GetMiningInfoResponse>(logger, ETPCommands.GetMiningInfo, ct);
+            
+            if (response?.Response == null)
+                throw new Exception("Unable to get mining info");
 
-            var wsEndpointConfig = new DaemonEndpointConfig
+            if (response.Response.BlockType?.ToLower() != "pow")
+                throw new Exception("Current block is not PoW");
+        }
+
+        protected override async Task PostStartInitAsync(CancellationToken ct)
+        {
+            await Task.CompletedTask;
+        }
+
+        public async Task<bool> UpdateJob(CancellationToken ct)
+        {
+            try
             {
-                Host = endpointConfig.Host,
-                Port = extra.PortWs!.Value,
-                HttpPath = extra.HttpPathWs,
-                Ssl = extra.SslWs
-            };
-
-            logger.Info(() => $"Subscribing to WebSocket {(wsEndpointConfig.Ssl ? "wss" : "ws")}://{wsEndpointConfig.Host}:{wsEndpointConfig.Port}");
-
-            var wsSubscription = "newHeads";
-            var isRetry = false;
-
-        retry:
-            // stream work updates
-            var getWorkObs = rpc.WebsocketSubscribe(logger, ct, wsEndpointConfig, EC.Subscribe, new[] { wsSubscription })
-                .Publish()
-                .RefCount();
-
-            // test subscription
-            var subcriptionResponse = await getWorkObs
-                .Take(1)
-                .Select(x => JsonConvert.DeserializeObject<JsonRpcResponse<string>>(Encoding.UTF8.GetString(x)))
-                .ToTask(ct);
-
-            if(subcriptionResponse.Error != null)
-            {
-                // older versions of geth only support subscriptions to "newBlocks"
-                if(!isRetry && subcriptionResponse.Error.Code == (int) BitcoinRPCErrorCode.RPC_METHOD_NOT_FOUND)
+                var response = await rpcClient.ExecuteAsync<GetMiningInfoResponse>(logger, ETPCommands.GetMiningInfo, ct);
+                if (response?.Response == null)
                 {
-                    wsSubscription = "newBlocks";
-
-                    isRetry = true;
-                    goto retry;
+                    logger.Warn("Unable to update job. Daemon returned empty response.");
+                    return false;
                 }
 
-                throw new PoolStartupException($"Unable to subscribe to geth websocket '{wsSubscription}': {subcriptionResponse.Error.Message} [{subcriptionResponse.Error.Code}]", poolConfig.Id);
+                var jobId = NextJobId();
+                var workResponse = await rpcClient.ExecuteAsync<string>(logger, ETPCommands.GetWork, ct);
+                var blockHex = workResponse?.Response ?? string.Empty;
+                
+                var job = new ETPJob(
+                    jobId,
+                    response.Response.Height.ToString(),  // используем высоту как prevHash
+                    blockHex,                            // используем шаблон блока из getwork
+                    response.Response.Difficulty,
+                    extraNonceProvider.Next(),
+                    "",
+                    DateTime.UtcNow.ToString("yyyyMMddHHmmss"),
+                    true,
+                    response.Response.Height
+                );
+
+                lock (jobLock)
+                {
+                    if (currentJob == null || job.Height > currentJob.Height)
+                    {
+                        currentJob = job;
+                        jobSubject.OnNext(job);
+                        return true;
+                    }
+                }
+
+                return false;
+            }
+            catch (Exception ex)
+            {
+                logger.Error(ex.Message);
+                return false;
+            }
+        }
+
+        public void PrepareWorker(StratumConnection connection)
+        {
+            var context = connection.ContextAs<ETPWorkerContext>();
+
+            if (context == null)
+            {
+                context = new ETPWorkerContext();
+                connection.SetContext(context);
             }
 
-            var websocketNotify = getWorkObs.Where(x => x != null)
-                .Publish()
-                .RefCount();
-
-            pollTimerRestart = blockSubmission.Merge(websocketNotify.Select(_ => Unit.Default))
-                .Publish()
-                .RefCount();
-
-            triggers.Add(websocketNotify.Select(_ => (JobRefreshBy.WebSocket, (string) null)));
-
-            triggers.Add(Observable.Timer(TimeSpan.FromMilliseconds(pollingInterval))
-                .TakeUntil(pollTimerRestart)
-                .Select(_ => (JobRefreshBy.Poll, (string) null))
-                .Repeat());
+            context.ExtraNonce1 = extraNonceProvider.Next();
+            
+            lock(jobLock)
+            {
+                if(currentJob != null)
+                    context.Difficulty = currentJob.Difficulty;
+                else
+                    context.Difficulty = extraPoolConfig?.Difficulty ?? 100000;
+            }
         }
 
-        else
+        public ETPJob GetJob()
         {
-            // ordinary polling (avoid this at all cost)
-            triggers.Add(Observable.Timer(TimeSpan.FromMilliseconds(pollingInterval))
-                .TakeUntil(pollTimerRestart)
-                .Select(_ => (JobRefreshBy.Poll, (string) null))
-                .Repeat());
+            lock(jobLock)
+            {
+                return currentJob;
+            }
         }
 
-        Jobs = triggers.Merge()
-            .Select(x => Observable.FromAsync(() => UpdateJob(ct, x.Via)))
-            .Concat()
-            .Where(isNew => isNew)
-            .Select(_ => Unit.Default)
-            .Publish()
-            .RefCount();
-    }
+        public async Task<Share> SubmitShareAsync(StratumConnection worker,
+            string[] request, double difficulty, CancellationToken ct)
+        {
+            Contract.RequiresNonNull(worker, nameof(worker));
+            Contract.RequiresNonNull(request, nameof(request));
 
-    #endregion // Overrides
+            var context = worker.ContextAs<ETPWorkerContext>();
+            
+            var share = new Share
+            {
+                PoolId = poolConfig.Id,
+                Difficulty = difficulty,
+                IpAddress = worker.RemoteEndpoint?.Address?.ToString(),
+                Miner = context?.Miner,
+                Worker = context?.Worker,
+                UserAgent = context?.UserAgent,
+                Source = request[1],
+                Created = DateTime.UtcNow
+            };
+
+            return share;
+        }
+    }
 }

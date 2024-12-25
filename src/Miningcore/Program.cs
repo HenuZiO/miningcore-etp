@@ -369,25 +369,26 @@ public class Program : BackgroundService
             .Where(config => config.Enabled)
             .Select(config => RunPool(config, coinTemplates, ct));
 
-        await Guard(()=> Task.WhenAll(tasks), ex =>
+        try
         {
-            switch(ex)
+            await Task.WhenAll(tasks);
+        }
+        catch(Exception ex)
+        {
+            if(ex is PoolStartupException pse)
             {
-                case PoolStartupException pse:
-                {
-                    var _logger = pse.PoolId != null ? LogUtil.GetPoolScopedLogger(GetType(), pse.PoolId) : logger;
-                    _logger.Error(() => $"{pse.Message}");
+                var _logger = pse.PoolId != null ? LogUtil.GetPoolScopedLogger(GetType(), pse.PoolId) : logger;
+                _logger.Error(() => $"{pse.Message}");
 
-                    logger.Error(() => "Cluster cannot start. Good Bye!");
-
-                    hal.StopApplication();
-                    break;
-                }
-
-                default:
-                    throw ex;
+                logger.Error(() => "Cluster cannot start. Good Bye!");
+                Environment.Exit(1);
             }
-        });
+            else
+            {
+                logger.Error(ex, () => "Unhandled exception during pool startup");
+                throw;
+            }
+        }
     }
 
     private async Task RunPool(PoolConfig poolConfig, Dictionary<string, CoinTemplate> coinTemplates, CancellationToken ct)
