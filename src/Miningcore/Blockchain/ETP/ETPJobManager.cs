@@ -54,7 +54,9 @@ namespace Miningcore.Blockchain.ETP
 
             this.messageBus = messageBus;
             this.serializerSettings = serializerSettings;
-            this.baseLogger = LogUtil.GetPoolScopedLogger(typeof(ETPJobManager), (string)null);
+            
+            // Initialize with a temporary logger
+            this.baseLogger = LogManager.GetLogger(nameof(ETPJobManager));
             
             // Initialize persistence task
             persistenceTask = Task.CompletedTask;
@@ -65,10 +67,12 @@ namespace Miningcore.Blockchain.ETP
             Contract.RequiresNonNull(pc);
             Contract.RequiresNonNull(cc);
 
-            baseLogger = LogUtil.GetPoolScopedLogger(typeof(ETPJobManager), pc);
             poolConfig = pc;
             clusterConfig = cc;
             extraPoolConfig = pc.Extra.SafeExtensionDataAs<ETPPoolConfigExtra>();
+
+            // Now that we have poolConfig, set up the proper logger
+            baseLogger = LogUtil.GetPoolScopedLogger(typeof(ETPJobManager), pc);
 
             // Extract daemon endpoints
             daemonEndpoints = pc.Daemons
