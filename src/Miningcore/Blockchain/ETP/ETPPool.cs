@@ -80,6 +80,7 @@ namespace Miningcore.Blockchain.ETP
                 switch(request.Method)
                 {
                     case ETPConstants.StratumMethods.Subscribe:
+                        logger.Info($"[{connection.ConnectionId}] New miner connected");
                         manager.PrepareWorker(connection);
                         await connection.RespondAsync(true, request.Id);
                         break;
@@ -94,6 +95,7 @@ namespace Miningcore.Blockchain.ETP
                             var split = workerValue.Split('.');
                             context.Worker = split.Length > 1 ? split[1] : split[0];
                             context.Miner = split[0];
+                            logger.Info($"[{connection.ConnectionId}] Authorized miner {context.Worker} (Wallet: {context.Miner})");
                         }
 
                         // Initialize worker
@@ -119,6 +121,7 @@ namespace Miningcore.Blockchain.ETP
                             var split = loginWorker.Split('.');
                             context.Worker = split.Length > 1 ? split[1] : split[0];
                             context.Miner = split[0];
+                            logger.Info($"[{connection.ConnectionId}] ETH login from miner {context.Worker} (Wallet: {context.Miner})");
                         }
 
                         // Initialize worker
@@ -156,6 +159,7 @@ namespace Miningcore.Blockchain.ETP
                         if (submitParams == null || submitParams.Length != 3)
                             throw new StratumException(StratumError.MinusOne, "Invalid parameters");
 
+                        logger.Info($"[{connection.ConnectionId}] Share submitted by miner {context.Worker} (Wallet: {context.Miner})");
                         var share = await manager.SubmitShareAsync(connection, submitParams, context.Difficulty, ct);
                         await connection.RespondAsync(true, request.Id);
                         OnShare(share);

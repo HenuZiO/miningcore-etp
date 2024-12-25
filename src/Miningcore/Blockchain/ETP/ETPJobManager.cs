@@ -217,26 +217,30 @@ namespace Miningcore.Blockchain.ETP
         public void PrepareWorker(StratumConnection connection)
         {
             var context = connection.ContextAs<ETPWorkerContext>();
+            var difficulty = context?.CurrentDifficulty ?? (double)ETPConstants.MinimumDifficulty;
 
-            // Assign unique ExtraNonce1 to worker (unique per connection)
-            context.ExtraNonce1 = extraNonceProvider.Next();
-
-            lock(jobLock)
+            // setup worker context
+            context = connection.ContextAs<ETPWorkerContext>();
+            if (context == null)
             {
-                if(currentJob != null)
-                    context.CurrentDifficulty = currentJob.Difficulty;
-                else
-                    context.CurrentDifficulty = extraPoolConfig?.Difficulty ?? 100000;
+                context = new ETPWorkerContext();
+                connection.SetContext(context);
             }
 
-            // Send difficulty
-            connection.NotifyAsync(ETPConstants.StratumMethods.SetDifficulty, new object[] { context.CurrentDifficulty });
-            context.HasSetDifficulty = true;
+            context.CurrentDifficulty = difficulty;
+            logger.Info($"[{connection.ConnectionId}] Setting difficulty to {difficulty} for worker {context.Worker ?? "Unknown"}");
 
-            // Send current job if available
-            if (currentJob != null)
+            // Send current job
+            var job = GetJob();
+            if (job != null)
             {
-                connection.NotifyAsync(ETPConstants.StratumMethods.MiningNotify, currentJob.GetStratumParams());
+                logger.Info($"[{connection.ConnectionId}] Sending initial job to worker {context.Worker ?? "Unknown"}");
+                connection.NotifyAsync(ETPConstants.StratumMethods.SetDifficulty, new object[] { context.CurrentDifficulty });
+                connection.NotifyAsync(ETPConstants.StratumMethods.MiningNotify, job.GetJobParamsForStratum());
+            }
+            else
+            {
+                logger.Warn($"[{connection.ConnectionId}] No job available for worker {context.Worker ?? "Unknown"}");
             }
         }
 
