@@ -36,21 +36,24 @@ namespace Miningcore.Blockchain.ETP
         private readonly Subject<ETPJob> jobSubject = new();
         public IObservable<ETPJob> Jobs => jobSubject.AsObservable();
 
-        private readonly IMessageBus messageBus;
+        private new readonly ILogger logger;
+        private new readonly IMessageBus messageBus;
         private readonly JsonSerializerSettings serializerSettings;
 
         public ETPJobManager(
             IComponentContext ctx,
             IMessageBus messageBus,
-            IExtraNonceProvider extraNonceProvider) :
-            base(ctx, messageBus)
+            JsonSerializerSettings serializerSettings,
+            PoolConfig poolConfig) : base(ctx, messageBus)
         {
-            Contract.RequiresNonNull(ctx, nameof(ctx));
-            Contract.RequiresNonNull(messageBus, nameof(messageBus));
-            Contract.RequiresNonNull(extraNonceProvider, nameof(extraNonceProvider));
+            Contract.RequiresNonNull(messageBus);
+            Contract.RequiresNonNull(serializerSettings);
+            Contract.RequiresNonNull(poolConfig);
+            Contract.RequiresNonNull(ctx);
 
             this.messageBus = messageBus;
-            this.serializerSettings = ctx.Resolve<JsonSerializerSettings>();
+            this.serializerSettings = serializerSettings;
+            this.logger = LogUtil.GetPoolScopedLogger(typeof(ETPJobManager), poolConfig);
         }
 
         public override void Configure(PoolConfig pc, ClusterConfig cc)
@@ -58,7 +61,6 @@ namespace Miningcore.Blockchain.ETP
             Contract.RequiresNonNull(pc);
             Contract.RequiresNonNull(cc);
 
-            logger = LogUtil.GetPoolScopedLogger(typeof(ETPJobManager), pc);
             poolConfig = pc;
             clusterConfig = cc;
             extraPoolConfig = pc.Extra.SafeExtensionDataAs<ETPPoolConfigExtra>();
@@ -140,21 +142,14 @@ namespace Miningcore.Blockchain.ETP
 
         protected override async Task PostStartInitAsync(CancellationToken ct)
         {
-            // Periodically update work
-            using var timer = new System.Timers.Timer(5000);
-            timer.Elapsed += async (sender, e) =>
-            {
-                try
-                {
-                    await UpdateJobAsync(ct);
-                }
-                catch(Exception ex)
-                {
-                    logger.Error(ex);
-                }
-            };
+            // Get initial job
+            await UpdateJobAsync(ct);
 
-            timer.Start();
+            // Start job polling in background
+            Observable.Interval(TimeSpan.FromMilliseconds(poolConfig.JobRebroadcastTimeout))
+                .Select(_ => Observable.FromAsync(() => UpdateJobAsync(ct)))
+                .Concat()
+                .Subscribe();
 
             await Task.CompletedTask;
         }
@@ -164,11 +159,17 @@ namespace Miningcore.Blockchain.ETP
             try
             {
                 var response = await rpcClient.ExecuteAsync<string[]>(logger,
-                    ETPConstants.RpcMethods.GetWork, ct);
+                    ETPConstants.RpcMethods.GetWork, ct, new object[] { });
 
                 if (response?.Error != null)
                 {
                     logger.Error(() => $"Error during getwork: {response.Error.Message}");
+                    return;
+                }
+
+                if (response?.Response == null || response.Response.Length == 0)
+                {
+                    logger.Error(() => $"Got empty getwork response");
                     return;
                 }
 
@@ -195,6 +196,9 @@ namespace Miningcore.Blockchain.ETP
                     currentJob = job;
                 }
 
+                messageBus.NotifyChainHeight(poolConfig.Id, (ulong)blockResponse.Response.Height, poolConfig.Template);
+
+                // Broadcast to connected clients
                 jobSubject.OnNext(job);
 
                 logger.Info(() => $"New job at height {job.Height}");
