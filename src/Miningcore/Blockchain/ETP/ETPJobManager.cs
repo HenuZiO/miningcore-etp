@@ -167,35 +167,40 @@ namespace Miningcore.Blockchain.ETP
         {
             try
             {
-                var work = await rpcClient.ExecuteAsync<string[]>(baseLogger,
-                    ETPConstants.RpcMethods.GetWork, ct, new object[] { });
+                // Get current block height
+                var info = await rpcClient.ExecuteAsync<GetInfoResponse>(baseLogger,
+                    ETPConstants.RpcMethods.GetInfo, ct);
+                if (info.Error != null)
+                {
+                    baseLogger.Error(() => $"Error during getinfo: {info.Error.Message}");
+                    return false;
+                }
 
-                if (work?.Error != null)
+                // Get work
+                var work = await rpcClient.ExecuteAsync<string[]>(baseLogger,
+                    ETPConstants.RpcMethods.GetWork, ct);
+                if (work.Error != null)
                 {
                     baseLogger.Error(() => $"Error during getwork: {work.Error.Message}");
                     return false;
                 }
 
-                // Generate unique job id
-                var jobId = Guid.NewGuid().ToString("N");
-
-                // Parse height
-                ulong height;
-                if (!ulong.TryParse(work.Response[3].ToString(), out height))
+                if (work.Response == null || work.Response.Length < 3)
                 {
-                    baseLogger.Error(() => $"Invalid block height in getwork response: {work.Response[3]}");
+                    baseLogger.Error(() => $"Invalid getwork response");
                     return false;
                 }
 
                 // Create job
                 var workResult = new GetWorkResult
                 {
-                    HeaderHash = work.Response[0].ToString(),
-                    SeedHash = work.Response[1].ToString(),
-                    Target = work.Response[2].ToString(),
-                    Height = height
+                    HeaderHash = work.Response[0],
+                    SeedHash = work.Response[1],
+                    Target = work.Response[2],
+                    Height = info.Response.Height
                 };
 
+                var jobId = Guid.NewGuid().ToString("N");
                 var job = new ETPJob(workResult, workResult.Height, jobId);
 
                 lock(jobLock)
