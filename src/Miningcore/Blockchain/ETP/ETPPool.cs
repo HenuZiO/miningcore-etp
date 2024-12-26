@@ -81,94 +81,21 @@ namespace Miningcore.Blockchain.ETP
                 switch(request.Method)
                 {
                     case ETPConstants.StratumMethods.Subscribe:
-                        logger.Info($"[{connection.ConnectionId}] New miner connected");
-                        manager.PrepareWorker(connection);
-                        await connection.RespondAsync(true, request.Id);
+                        await OnSubscribeAsync(connection, request);
                         break;
 
                     case ETPConstants.StratumMethods.Authorize:
-                        var authParams = request.ParamsAs<string[]>();
-                        var workerValue = authParams?.Length > 0 ? authParams[0] : null;
-
-                        if (!string.IsNullOrEmpty(workerValue))
-                        {
-                            // Split worker from wallet if format is wallet.worker
-                            var split = workerValue.Split('.');
-                            context.Worker = split.Length > 1 ? split[1] : split[0];
-                            context.Miner = split[0];
-                            logger.Info($"[{connection.ConnectionId}] Authorized miner {context.Worker} (Wallet: {context.Miner})");
-                        }
-
-                        // Initialize worker
-                        manager.PrepareWorker(connection);
-
-                        // Send successful response with worker name
-                        await connection.RespondAsync(true, request.Id);
+                        await OnAuthorizeAsync(connection, request);
                         break;
 
-                    case ETPConstants.StratumMethods.EthSubmitLogin:
-                        if (request.Id == null)
-                            throw new StratumException(StratumError.MinusOne, "Missing request id");
-
-                        var loginParams = request.ParamsAs<string[]>();
-                        if (loginParams == null || loginParams.Length < 1)
-                            throw new StratumException(StratumError.MinusOne, "Invalid parameters");
-
-                        var loginWorker = loginParams[0];
-
-                        if (!string.IsNullOrEmpty(loginWorker))
-                        {
-                            // Split worker from wallet if format is wallet.worker
-                            var split = loginWorker.Split('.');
-                            context.Worker = split.Length > 1 ? split[1] : split[0];
-                            context.Miner = split[0];
-                            logger.Info($"[{connection.ConnectionId}] ETH login from miner {context.Worker} (Wallet: {context.Miner})");
-                        }
-
-                        // Initialize worker
-                        manager.PrepareWorker(connection);
-
-                        // Send successful response
-                        await connection.RespondAsync(true, request.Id);
-                        break;
-
-                    case ETPConstants.StratumMethods.EthGetWork:
-                        if (context == null)
-                            throw new StratumException(StratumError.MinusOne, "Context not initialized");
-
-                        var job = manager.GetJob();
-                        if (job != null)
-                        {
-                            await connection.RespondAsync(job.GetJobParamsForStratum(), request.Id);
-                            logger.Debug($"[{connection.ConnectionId}] Sent work to miner: {context.Worker ?? "Unknown"}");
-                        }
-                        else
-                        {
-                            await connection.RespondAsync(new object[] { }, request.Id);
-                            logger.Debug($"[{connection.ConnectionId}] No work available for miner: {context.Worker ?? "Unknown"}");
-                        }
-                        break;
-
-                    case ETPConstants.StratumMethods.EthSubmitWork:
-                        if (context == null)
-                            throw new StratumException(StratumError.MinusOne, "Context not initialized");
-
-                        if (request.Id == null)
-                            throw new StratumException(StratumError.MinusOne, "Missing request id");
-
-                        var submitParams = request.ParamsAs<string[]>();
-                        if (submitParams == null || submitParams.Length != 3)
-                            throw new StratumException(StratumError.MinusOne, "Invalid parameters");
-
-                        logger.Info($"[{connection.ConnectionId}] Share submitted by miner {context.Worker} (Wallet: {context.Miner})");
-                        var share = await manager.SubmitShareAsync(connection, submitParams, context.Difficulty, ct);
-                        await connection.RespondAsync(true, request.Id);
-                        OnShare(share);
+                    case ETPConstants.StratumMethods.Submit:
+                        await OnSubmitAsync(connection, request);
                         break;
 
                     default:
-                        logger.Debug($"[{connection.ConnectionId}] Unsupported method: {request.Method}");
-                        await connection.RespondErrorAsync(StratumError.Other, $"Unsupported method: {request.Method}", request.Id);
+                        logger.Debug(() => $"[{connection.ConnectionId}] Unsupported RPC request: {JsonConvert.SerializeObject(request, serializerSettings)}");
+
+                        await connection.RespondErrorAsync(StratumError.Other, $"Unsupported request {request.Method}", request.Id);
                         break;
                 }
             }
@@ -283,6 +210,51 @@ namespace Miningcore.Blockchain.ETP
         {
             logger.Info(() => $"Pool: {poolConfig.Id} [{string.Join(", ", poolConfig.Ports.Keys)}]");
             logger.Info(() => $"Network: {poolConfig.Coin}");
+        }
+
+        private async Task OnSubscribeAsync(StratumConnection connection, JsonRpcRequest request)
+        {
+            logger.Info($"[{connection.ConnectionId}] New miner connected");
+            manager.PrepareWorker(connection);
+            await connection.RespondAsync(true, request.Id);
+        }
+
+        private async Task OnAuthorizeAsync(StratumConnection connection, JsonRpcRequest request)
+        {
+            var context = connection.ContextAs<ETPWorkerContext>();
+            var authParams = request.ParamsAs<string[]>();
+            var workerValue = authParams?.Length > 0 ? authParams[0] : null;
+
+            if (!string.IsNullOrEmpty(workerValue))
+            {
+                // Split worker from wallet if format is wallet.worker
+                var split = workerValue.Split('.');
+                context.Worker = split.Length > 1 ? split[1] : split[0];
+                context.Miner = split[0];
+                logger.Info($"[{connection.ConnectionId}] Authorized miner {context.Worker} (Wallet: {context.Miner})");
+            }
+
+            // Initialize worker
+            manager.PrepareWorker(connection);
+
+            // Send successful response with worker name
+            await connection.RespondAsync(true, request.Id);
+        }
+
+        private async Task OnSubmitAsync(StratumConnection connection, JsonRpcRequest request)
+        {
+            if (request.Id == null)
+                throw new StratumException(StratumError.MinusOne, "Missing request id");
+
+            var context = connection.ContextAs<ETPWorkerContext>();
+            var submitParams = request.ParamsAs<string[]>();
+            if (submitParams == null || submitParams.Length != 3)
+                throw new StratumException(StratumError.MinusOne, "Invalid parameters");
+
+            logger.Info($"[{connection.ConnectionId}] Share submitted by miner {context.Worker} (Wallet: {context.Miner})");
+            var share = await manager.SubmitShareAsync(connection, submitParams, context.Difficulty, CancellationToken.None);
+            await connection.RespondAsync(true, request.Id);
+            OnShare(share);
         }
     }
 }

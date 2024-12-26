@@ -4,20 +4,10 @@ namespace Miningcore.Blockchain.ETP
 {
     public class GetWorkResult
     {
-        public GetWorkResult(string[] response)
+        public GetWorkResult()
         {
-            if (response == null || response.Length < 3)
-                throw new ArgumentException("Invalid getwork response");
-
-            HeaderHash = response[0];
-            SeedHash = response[1];
-            Target = response[2];
-            
-            // Generate a unique job ID
+            // Initialize fields
             JobId = Guid.NewGuid().ToString("N");
-            
-            // Initialize other fields
-            PreviousBlockHash = HeaderHash;
             ExtraNonce1 = string.Empty;
             ExtraNonce2 = string.Empty;
             Timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds();

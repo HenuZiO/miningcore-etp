@@ -4,7 +4,7 @@ namespace Miningcore.Blockchain.ETP
 {
     public class ETPConstants
     {
-        public const string ETPStratumVersion = "EthereumStratum/1.0.0";  // Changed to Ethereum compatible
+        public const string ETPStratumVersion = "ETPStratum/1.0.0";  
         public const decimal MinimumDifficulty = 0.001m;
         public const string DifficultyUnit = "MH";
         
@@ -16,10 +16,11 @@ namespace Miningcore.Blockchain.ETP
         public static class RpcMethods
         {
             public const string GetInfo = "getinfo";
-            public const string GetWork = "eth_getwork";
-            public const string SubmitWork = "eth_submitwork";
+            public const string GetWork = "getwork";
+            public const string SubmitWork = "submitwork";
             public const string ValidateAddress = "validateaddress";
             public const string GetPeerInfo = "getpeerinfo";
+            public const string SetMiningAccount = "setminingaccount";
         }
 
         public static class StratumMethods
@@ -30,12 +31,6 @@ namespace Miningcore.Blockchain.ETP
             public const string Submit = "mining.submit";
             public const string GetTransactions = "mining.get_transactions";
             public const string ExtraNonceSubscribe = "mining.extranonce.subscribe";
-            
-            // Ethereum Stratum Methods
-            public const string EthSubmitLogin = "eth_submitLogin";
-            public const string EthGetWork = "eth_getWork";
-            public const string EthSubmitWork = "eth_submitWork";
-            public const string EthSubmitHashrate = "eth_submitHashrate";
             
             // Notifications
             public const string SetDifficulty = "mining.set_difficulty";

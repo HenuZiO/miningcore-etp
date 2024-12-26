@@ -163,58 +163,53 @@ namespace Miningcore.Blockchain.ETP
             await Task.CompletedTask;
         }
 
-        private async Task UpdateJobAsync(CancellationToken ct)
+        private async Task<bool> UpdateJobAsync(CancellationToken ct)
         {
             try
             {
-                var response = await rpcClient.ExecuteAsync<string[]>(baseLogger,
+                var work = await rpcClient.ExecuteAsync<string[]>(baseLogger,
                     ETPConstants.RpcMethods.GetWork, ct, new object[] { });
 
-                if (response?.Error != null)
+                if (work?.Error != null)
                 {
-                    baseLogger.Error(() => $"Error during getwork: {response.Error.Message}");
-                    return;
+                    baseLogger.Error(() => $"Error during getwork: {work.Error.Message}");
+                    return false;
                 }
 
-                if (response?.Response == null || response.Response.Length == 0)
+                // Generate unique job id
+                var jobId = Guid.NewGuid().ToString("N");
+
+                // Parse height
+                ulong height;
+                if (!ulong.TryParse(work.Response[3].ToString(), out height))
                 {
-                    baseLogger.Error(() => $"Got empty getwork response");
-                    return;
+                    baseLogger.Error(() => $"Invalid block height in getwork response: {work.Response[3]}");
+                    return false;
                 }
-
-                // Create GetWorkResult from response
-                var workResult = new GetWorkResult(response.Response);
-
-                // Get current block number for height
-                var blockResponse = await rpcClient.ExecuteAsync<GetInfoResponse>(baseLogger,
-                    ETPConstants.RpcMethods.GetInfo, ct, new object[] { });
-
-                if (blockResponse?.Error != null)
-                {
-                    baseLogger.Error(() => $"Error getting block number: {blockResponse.Error.Message}");
-                    return;
-                }
-
-                workResult.Height = (ulong)blockResponse.Response.Height;
 
                 // Create job
-                var job = new ETPJob(workResult, workResult.Height, workResult.Target);
+                var workResult = new GetWorkResult
+                {
+                    HeaderHash = work.Response[0].ToString(),
+                    SeedHash = work.Response[1].ToString(),
+                    Target = work.Response[2].ToString(),
+                    Height = height
+                };
+
+                var job = new ETPJob(workResult, workResult.Height, jobId);
 
                 lock(jobLock)
                 {
                     currentJob = job;
+                    jobSubject.OnNext(job);
                 }
 
-                messageBus.NotifyChainHeight(poolConfig.Id, (ulong)blockResponse.Response.Height, poolConfig.Template);
-
-                // Broadcast to connected clients
-                jobSubject.OnNext(job);
-
-                baseLogger.Info(() => $"New job at height {job.Height}");
+                return true;
             }
             catch(Exception ex)
             {
-                baseLogger.Error(ex, () => "Error during job update");
+                baseLogger.Error(ex);
+                return false;
             }
         }
 
