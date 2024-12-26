@@ -256,5 +256,13 @@ namespace Miningcore.Blockchain.ETP
             await connection.RespondAsync(true, request.Id);
             OnShare(share);
         }
+
+        private async Task<GetInfoResponse> GetBlockchainInfoAsync(CancellationToken ct)
+        {
+            if (manager == null)
+                throw new InvalidOperationException("Job manager not initialized");
+
+            return await manager.GetBlockchainInfoAsync(ct);
+        }
     }
 }

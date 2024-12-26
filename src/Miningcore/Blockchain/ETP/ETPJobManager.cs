@@ -169,7 +169,7 @@ namespace Miningcore.Blockchain.ETP
             {
                 // Get current block height
                 var info = await rpcClient.ExecuteAsync<GetInfoResponse>(baseLogger,
-                    ETPConstants.RpcMethods.GetInfo, ct);
+                    ETPConstants.RpcMethods.GetInfo, ct, new object[] { });
                 if (info.Error != null)
                 {
                     baseLogger.Error(() => $"Error during getinfo: {info.Error.Message}");
@@ -333,6 +333,17 @@ namespace Miningcore.Blockchain.ETP
             }
 
             return share;
+        }
+
+        public async Task<GetInfoResponse> GetBlockchainInfoAsync(CancellationToken ct)
+        {
+            var response = await rpcClient.ExecuteAsync<GetInfoResponse>(baseLogger,
+                ETPConstants.RpcMethods.GetInfo, ct, new object[] { });
+
+            if (response.Error != null)
+                throw new Exception($"Error during getinfo: {response.Error.Message}");
+
+            return response.Response;
         }
 
         public double ShareMultiplier => ETPConstants.ShareMultiplier;
